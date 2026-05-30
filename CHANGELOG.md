@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.4] - 2026-05-30
+
+- Update cache-busting query parameters in index.html to v0.2.4
+
 ## [0.2.3] - 2026-05-30
 
 - Fix TypeError on raycast hover by traversing up parent nodes to find parcelItem
