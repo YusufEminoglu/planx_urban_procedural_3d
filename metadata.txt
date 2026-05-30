@@ -3,7 +3,7 @@ name=PlanX Urban Procedural 3D
 qgisMinimumVersion=3.28
 qgisMaximumVersion=3.99
 description=Parametric 3D urban design and procedural planning toolbox with Modelur-style feedback loops.
-version=0.1.0
+version=0.1.1
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
@@ -23,4 +23,5 @@ hasProcessingProvider=no
 license=GPL-3
 
 changelog=
+    PlanX Urban Procedural 3D 0.1.1 - Added English UI, QSS styling, advanced 3D building modeling, sidewalks/streets, and 3D zoning envelopes.
     PlanX Urban Procedural 3D 0.1.0 - Initial release.
