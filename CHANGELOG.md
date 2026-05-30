@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.1] - 2026-05-30
+
+- Implement ThreadingHTTPServer to prevent loading screen hang and auto-project geographic coordinates to EPSG:3857 in Web UI
+
 ## [0.2.0] - 2026-05-30
 
 - Instantiate HTTPServer synchronously in main thread to propagate port binding errors

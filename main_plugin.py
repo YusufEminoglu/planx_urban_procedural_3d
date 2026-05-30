@@ -33,6 +33,8 @@ class PlanXUrbanProcedural3D:
         self.dialog = None
         self.server = None
         self.active_layer = None
+        self.crs_transformed = False
+        self.export_crs = None
 
     def initGui(self) -> None:
         self.action = QAction(QIcon(self.icon_path), "PlanX Urban Procedural 3D", self.iface.mainWindow())
@@ -75,12 +77,19 @@ class PlanXUrbanProcedural3D:
         # Check Coordinate Reference System (CRS) unit type
         crs = layer.crs()
         crs_is_geographic = crs.isGeographic()
+        
+        from qgis.core import QgsCoordinateReferenceSystem
         if crs_is_geographic:
+            self.export_crs = QgsCoordinateReferenceSystem("EPSG:3857") # Web Mercator (meters)
+            self.crs_transformed = True
             self.iface.messageBar().pushWarning(
                 "PlanX Urban Procedural 3D",
-                "Warning: Active layer uses geographic coordinates (degrees). "
-                "3D metric calculations will be incorrect. Please reproject to a projected CRS (meters)."
+                "Active layer uses geographic coordinates (degrees). "
+                "Geometries are automatically projected to Web Mercator (meters) for local 3D rendering."
             )
+        else:
+            self.export_crs = crs
+            self.crs_transformed = False
 
         # Prepare directory paths
         web_dir = os.path.join(self.plugin_dir, "web")
@@ -105,7 +114,7 @@ class PlanXUrbanProcedural3D:
             # Enable coordinate precision and include ID
             exporter.setPrecision(6)
             exporter.setIncludeAttributes(True)
-            exporter.setDestinationCrs(layer.crs()) # Export in layer's own projected CRS (meters)
+            exporter.setDestinationCrs(self.export_crs) # Export in export CRS (meters if layer is geographic)
             
             features = list(layer.getFeatures())
             geojson_str = exporter.exportFeatures(features)
@@ -223,6 +232,17 @@ class PlanXUrbanProcedural3D:
                         pts.append(pts[0])
                     ring = QgsLineString(pts)
                     poly_geom = QgsGeometry(QgsPolygon(ring))
+                    
+                    # Re-project back to geographic CRS if we exported in EPSG:3857
+                    if self.crs_transformed:
+                        from qgis.core import QgsCoordinateTransform, QgsProject, QgsCoordinateReferenceSystem
+                        xform = QgsCoordinateTransform(
+                            QgsCoordinateReferenceSystem("EPSG:3857"),
+                            self.active_layer.crs(),
+                            QgsProject.instance()
+                        )
+                        poly_geom.transform(xform)
+                        
                     self.active_layer.changeGeometry(fid, poly_geom)
 
             # Commit changes
