@@ -15,6 +15,12 @@
     </script>
 </head>
 <body>
+    <!-- CRS Warning Banner -->
+    <div id="crs-warning-banner" class="warning-banner hidden">
+        <span class="warning-icon">⚠</span>
+        <span class="warning-text">Geographic CRS (degrees) detected. Distance metrics & heights will be distorted. Reproject to a projected CRS.</span>
+    </div>
+
     <div id="loading" class="loading-screen">
         <div class="spinner"></div>
         <h2>PlanX Urban Procedural 3D</h2>
@@ -127,6 +133,42 @@
             <hr class="divider">
 
             <div class="dock-header">
+                <h4>View Settings</h4>
+            </div>
+            <div class="control-group view-toggles">
+                <label class="checkbox-container">
+                    <input type="checkbox" id="toggle-buildings" checked>
+                    Show Buildings
+                </label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="toggle-zoning" checked>
+                    Show Zoning Envelopes
+                </label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="toggle-setbacks" checked>
+                    Show Setback Lines
+                </label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="toggle-sidewalks" checked>
+                    Show Sidewalks & Trees
+                </label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="toggle-pedestrians" checked>
+                    Show Pedestrians
+                </label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="toggle-traffic" checked>
+                    Show Traffic Cars
+                </label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="toggle-grid" checked>
+                    Show Ground Grid
+                </label>
+            </div>
+
+            <hr class="divider">
+
+            <div class="dock-header">
                 <h4>Compliance Dashboard</h4>
             </div>
 
@@ -187,6 +229,7 @@
 
             <button id="btn-sync" class="sync-button">Sync Parameters to QGIS</button>
             <button id="btn-apply-all" class="apply-all-button">Apply to All Parcels</button>
+            <button id="btn-reload" class="reload-button">Reload Data from QGIS</button>
             <button id="btn-capture" class="capture-button">Download Viewport Capture</button>
         </div>
     </div>

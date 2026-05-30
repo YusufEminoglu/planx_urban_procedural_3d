@@ -31,6 +31,17 @@ const placeholderEl = document.getElementById('selection-placeholder');
 const controlsEl = document.getElementById('editor-controls');
 const btnSync = document.getElementById('btn-sync');
 const btnCapture = document.getElementById('btn-capture');
+const btnReload = document.getElementById('btn-reload');
+const crsWarningBannerEl = document.getElementById('crs-warning-banner');
+
+// View settings checkbox controls
+const toggleBuildingsEl = document.getElementById('toggle-buildings');
+const toggleZoningEl = document.getElementById('toggle-zoning');
+const toggleSetbacksEl = document.getElementById('toggle-setbacks');
+const toggleSidewalksEl = document.getElementById('toggle-sidewalks');
+const togglePedestriansEl = document.getElementById('toggle-pedestrians');
+const toggleTrafficEl = document.getElementById('toggle-traffic');
+const toggleGridEl = document.getElementById('toggle-grid');
 
 // Input controls
 const inTypology = document.getElementById('input-typology');
@@ -272,6 +283,7 @@ function init() {
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
     window.addEventListener('click', onDocumentClick);
+    window.addEventListener('pointermove', onPointerMove);
     window.addEventListener('resize', onWindowResize);
 
     setupInputListeners();
@@ -369,6 +381,24 @@ function setupInputListeners() {
 
     btnSync.addEventListener('click', syncToQGIS);
     btnCapture.addEventListener('click', captureViewport);
+
+    // Reload Data button
+    if (btnReload) {
+        btnReload.addEventListener('click', reloadData);
+    }
+
+    // View toggles listeners
+    const onVisibilityChange = () => {
+        updateLayersVisibility();
+    };
+
+    if (toggleBuildingsEl) toggleBuildingsEl.addEventListener('change', onVisibilityChange);
+    if (toggleZoningEl) toggleZoningEl.addEventListener('change', onVisibilityChange);
+    if (toggleSetbacksEl) toggleSetbacksEl.addEventListener('change', onVisibilityChange);
+    if (toggleSidewalksEl) toggleSidewalksEl.addEventListener('change', onVisibilityChange);
+    if (togglePedestriansEl) togglePedestriansEl.addEventListener('change', onVisibilityChange);
+    if (toggleTrafficEl) toggleTrafficEl.addEventListener('change', onVisibilityChange);
+    if (toggleGridEl) toggleGridEl.addEventListener('change', onVisibilityChange);
 
     // Apply All button
     if (btnApplyAll) {
@@ -489,6 +519,19 @@ async function loadGeoJSON() {
 // Parse GeoJSON geometries and center coordinates
 function parseGeoJSON(data) {
     if (!data.features || data.features.length === 0) return;
+
+    // Clear existing scene elements and memory/resources
+    clearScene();
+
+    // Check if layer CRS is geographic
+    const isGeographic = !!data.crs_is_geographic;
+    if (crsWarningBannerEl) {
+        if (isGeographic) {
+            crsWarningBannerEl.classList.remove('hidden');
+        } else {
+            crsWarningBannerEl.classList.add('hidden');
+        }
+    }
 
     hudTotalParcels.textContent = data.features.length;
     if (data.crs && data.crs.properties && data.crs.properties.name) {
@@ -2260,6 +2303,9 @@ function handleKeyboardShortcuts(event) {
         case 'g': // Toggle grid visibility
             if (gridHelper) {
                 gridHelper.visible = !gridHelper.visible;
+                if (toggleGridEl) {
+                    toggleGridEl.checked = gridHelper.visible;
+                }
             }
             break;
     }
@@ -2307,4 +2353,258 @@ function applyToAllParcels() {
 
     btnApplyAll.disabled = false;
     btnApplyAll.textContent = 'Apply to All Parcels';
+}
+
+// ───────────────────────── WebGL Memory & Resource Cleanup ─────────────────────────
+
+function clearScene() {
+    // 1. Deselect any active parcel
+    deselectParcel();
+
+    // 2. Remove and dispose parcelFeatures elements
+    parcelFeatures.forEach(item => {
+        // Remove and dispose parcelMesh
+        if (item.parcelMesh) {
+            scene.remove(item.parcelMesh);
+            if (item.parcelMesh.geometry) item.parcelMesh.geometry.dispose();
+            disposeMaterialOrMaterials(item.parcelMesh.material);
+        }
+
+        // Remove and dispose buildingMesh
+        if (item.buildingMesh) {
+            scene.remove(item.buildingMesh);
+            disposeObject3D(item.buildingMesh);
+        }
+
+        // Remove and dispose setbackMesh
+        if (item.setbackMesh) {
+            scene.remove(item.setbackMesh);
+            if (item.setbackMesh.geometry) item.setbackMesh.geometry.dispose();
+            disposeMaterialOrMaterials(item.setbackMesh.material);
+        }
+
+        // Remove and dispose sidewalkMesh
+        if (item.sidewalkMesh) {
+            scene.remove(item.sidewalkMesh);
+            disposeObject3D(item.sidewalkMesh);
+        }
+
+        // Remove and dispose zoningMesh
+        if (item.zoningMesh) {
+            scene.remove(item.zoningMesh);
+            disposeObject3D(item.zoningMesh);
+        }
+    });
+    parcelFeatures = [];
+
+    // 3. Remove and dispose pedestrians
+    pedestrians.forEach(ped => {
+        if (ped.mesh) {
+            scene.remove(ped.mesh);
+            disposeObject3D(ped.mesh);
+        }
+    });
+    pedestrians = [];
+
+    // 4. Remove and dispose traffic cars
+    trafficCars.forEach(car => {
+        if (car.carMesh) {
+            scene.remove(car.carMesh);
+            disposeObject3D(car.carMesh);
+        }
+    });
+    trafficCars = [];
+}
+
+// Deep dispose helper for geometry, material, textures
+function disposeObject3D(obj) {
+    obj.traverse(child => {
+        if (child.isMesh) {
+            if (child.geometry) child.geometry.dispose();
+            disposeMaterialOrMaterials(child.material);
+        }
+    });
+}
+
+function disposeMaterialOrMaterials(material) {
+    if (!material) return;
+    if (Array.isArray(material)) {
+        material.forEach(m => disposeSingleMaterial(m));
+    } else {
+        disposeSingleMaterial(material);
+    }
+}
+
+function disposeSingleMaterial(m) {
+    if (!m) return;
+    if (m.map) m.map.dispose();
+    if (m.lightMap) m.lightMap.dispose();
+    if (m.bumpMap) m.bumpMap.dispose();
+    if (m.normalMap) m.normalMap.dispose();
+    if (m.specularMap) m.specularMap.dispose();
+    if (m.envMap) m.envMap.dispose();
+    if (m.alphaMap) m.alphaMap.dispose();
+    if (m.aoMap) m.aoMap.dispose();
+    if (m.displacementMap) m.displacementMap.dispose();
+    if (m.emissiveMap) m.emissiveMap.dispose();
+    if (m.roughnessMap) m.roughnessMap.dispose();
+    if (m.metalnessMap) m.metalnessMap.dispose();
+    m.dispose();
+}
+
+// ───────────────────────── Dynamic Layers Visibility ─────────────────────────
+
+function updateLayersVisibility() {
+    const showBuildings = toggleBuildingsEl ? toggleBuildingsEl.checked : true;
+    const showZoning = toggleZoningEl ? toggleZoningEl.checked : true;
+    const showSetbacks = toggleSetbacksEl ? toggleSetbacksEl.checked : true;
+    const showSidewalks = toggleSidewalksEl ? toggleSidewalksEl.checked : true;
+    const showPedestrians = togglePedestriansEl ? togglePedestriansEl.checked : true;
+    const showTraffic = toggleTrafficEl ? toggleTrafficEl.checked : true;
+    const showGrid = toggleGridEl ? toggleGridEl.checked : true;
+
+    // Toggle grid
+    if (gridHelper) {
+        gridHelper.visible = showGrid;
+    }
+
+    // Toggle features
+    parcelFeatures.forEach(item => {
+        if (item.buildingMesh) {
+            item.buildingMesh.visible = showBuildings;
+        }
+        if (item.zoningMesh) {
+            item.zoningMesh.visible = showZoning;
+        }
+        if (item.setbackMesh) {
+            item.setbackMesh.visible = showSetbacks;
+        }
+        if (item.sidewalkMesh) {
+            item.sidewalkMesh.visible = showSidewalks;
+        }
+    });
+
+    // Toggle pedestrian meshes
+    pedestrians.forEach(ped => {
+        if (ped.mesh) ped.mesh.visible = showPedestrians;
+    });
+
+    // Toggle traffic car meshes
+    trafficCars.forEach(car => {
+        if (car.carMesh) car.carMesh.visible = showTraffic;
+    });
+}
+
+// ───────────────────────── Reload Data from QGIS ─────────────────────────
+
+async function reloadData() {
+    if (btnReload) {
+        btnReload.disabled = true;
+        btnReload.textContent = "Reloading...";
+    }
+    
+    // Re-show loading screen
+    if (loadingEl) {
+        loadingEl.style.opacity = 1;
+        loadingEl.classList.remove('hidden');
+        const textEl = document.getElementById('loading-text');
+        if (textEl) textEl.innerText = "Reloading layer features from QGIS...";
+    }
+
+    try {
+        const response = await fetch('/data.geojson');
+        if (!response.ok) throw new Error("Could not load data");
+        
+        const data = await response.json();
+        parseGeoJSON(data);
+        
+        // Hide loading screen
+        if (loadingEl) {
+            loadingEl.style.opacity = 0;
+            setTimeout(() => loadingEl.classList.add('hidden'), 500);
+        }
+        
+        // Keep checkboxes synchronized after reload
+        updateLayersVisibility();
+        
+    } catch (e) {
+        console.error(e);
+        const textEl = document.getElementById('loading-text');
+        if (textEl) textEl.innerText = "ERROR: Failed to reload. Verify QGIS server connection.";
+    } finally {
+        if (btnReload) {
+            btnReload.disabled = false;
+            btnReload.textContent = "Reload Data from QGIS";
+        }
+    }
+}
+
+// ───────────────────────── Pointer Hover highlights ─────────────────────────
+
+let hoveredParcel = null;
+
+function onPointerMove(event) {
+    if (event.target.closest('#control-dock') || event.target.closest('.hud-bar') || event.target.closest('.loading-screen')) {
+        document.body.style.cursor = 'default';
+        return;
+    }
+
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+
+    const meshes = [];
+    parcelFeatures.forEach(item => {
+        if (item.parcelMesh) meshes.push(item.parcelMesh);
+        if (item.buildingMesh) meshes.push(item.buildingMesh);
+    });
+
+    const intersects = raycaster.intersectObjects(meshes);
+
+    if (intersects.length > 0) {
+        document.body.style.cursor = 'pointer';
+        const hitObject = intersects[0].object;
+        const item = hitObject.userData.parcelItem;
+        
+        if (hoveredParcel !== item) {
+            // Un-highlight previous hover
+            if (hoveredParcel && hoveredParcel !== selectedParcel) {
+                setBuildingHoverHighlight(hoveredParcel.buildingMesh, false);
+            }
+            // Apply hover highlight
+            hoveredParcel = item;
+            if (hoveredParcel !== selectedParcel) {
+                setBuildingHoverHighlight(hoveredParcel.buildingMesh, true);
+            }
+        }
+    } else {
+        document.body.style.cursor = 'default';
+        if (hoveredParcel) {
+            if (hoveredParcel !== selectedParcel) {
+                setBuildingHoverHighlight(hoveredParcel.buildingMesh, false);
+            }
+            hoveredParcel = null;
+        }
+    }
+}
+
+function setBuildingHoverHighlight(meshOrGroup, isHovered) {
+    if (!meshOrGroup) return;
+    meshOrGroup.traverse(child => {
+        if (child.isMesh && Array.isArray(child.material)) {
+            const wallMat = child.material[1];
+            if (wallMat) {
+                if (isHovered) {
+                    wallMat.emissive.setHex(0x555555); // subtle glow highlight on hover
+                    wallMat.emissiveIntensity = 0.8;
+                } else {
+                    const tVal = parseFloat(inTime.value);
+                    const isNight = tVal < 7.5 || tVal > 19.5;
+                    wallMat.emissive.setHex(0xffffff); // default emissive color
+                    wallMat.emissiveIntensity = isNight ? 1.0 : 0.0;
+                }
+            }
+        }
+    });
 }

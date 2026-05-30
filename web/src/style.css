@@ -465,3 +465,90 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .hud-shortcuts:hover {
     background: rgba(255,255,255,0.1);
 }
+
+/* CRS Warning Banner */
+.warning-banner {
+    position: absolute;
+    top: 20px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 1000;
+    background: rgba(180, 83, 9, 0.85); /* amber-800 glassmorphism */
+    backdrop-filter: blur(12px);
+    -webkit-backdrop-filter: blur(12px);
+    border: 1px solid rgba(245, 158, 11, 0.4);
+    box-shadow: 0 10px 30px rgba(0,0,0,0.5), 0 0 15px rgba(245, 158, 11, 0.15);
+    border-radius: 8px;
+    padding: 10px 20px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    max-width: 90%;
+    width: max-content;
+    color: #fef3c7;
+    font-size: 0.82rem;
+    font-weight: 500;
+    pointer-events: auto;
+    transition: opacity 0.3s ease;
+}
+
+.warning-icon {
+    font-size: 1.1rem;
+    color: #fbbf24;
+}
+
+/* Reload Button */
+.reload-button {
+    width: 100%;
+    background: transparent;
+    color: #38bdf8;
+    border: 1px dashed #0284c7;
+    padding: 8px;
+    border-radius: 8px;
+    font-family: var(--font-family);
+    font-weight: 550;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 5px;
+}
+
+.reload-button:hover {
+    background: rgba(14, 165, 233, 0.15);
+    border-style: solid;
+}
+
+.reload-button:active {
+    transform: translateY(0);
+    opacity: 0.85;
+}
+
+/* View Settings Checkboxes */
+.view-toggles {
+    display: grid;
+    grid-template-columns: 1fr;
+    gap: 6px;
+    padding: 4px 0;
+}
+
+.checkbox-container {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 0.8rem;
+    color: var(--text-secondary);
+    cursor: pointer;
+    user-select: none;
+    transition: color 0.15s;
+}
+
+.checkbox-container input {
+    cursor: pointer;
+    accent-color: var(--accent-hover);
+    width: 14px;
+    height: 14px;
+}
+
+.checkbox-container:hover {
+    color: var(--text-primary);
+}

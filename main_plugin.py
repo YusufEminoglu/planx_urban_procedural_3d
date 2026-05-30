@@ -72,6 +72,16 @@ class PlanXUrbanProcedural3D:
 
         self.active_layer = layer
 
+        # Check Coordinate Reference System (CRS) unit type
+        crs = layer.crs()
+        crs_is_geographic = crs.isGeographic()
+        if crs_is_geographic:
+            self.iface.messageBar().pushWarning(
+                "PlanX Urban Procedural 3D",
+                "Warning: Active layer uses geographic coordinates (degrees). "
+                "3D metric calculations will be incorrect. Please reproject to a projected CRS (meters)."
+            )
+
         # Prepare directory paths
         web_dir = os.path.join(self.plugin_dir, "web")
         
@@ -98,15 +108,32 @@ class PlanXUrbanProcedural3D:
             
             features = list(layer.getFeatures())
             geojson_str = exporter.exportFeatures(features)
+            
+            # Inject CRS information so Web UI knows if it is geographic
+            try:
+                import json
+                geojson_dict = json.loads(geojson_str)
+                geojson_dict["crs_is_geographic"] = crs_is_geographic
+                geojson_str = json.dumps(geojson_dict)
+            except Exception as json_err:
+                from qgis.core import QgsMessageLog
+                QgsMessageLog.logMessage(f"Failed to inject CRS info: {json_err}", "PlanX", QgsMessageLog.Warning)
+
             self.server.update_geojson(geojson_str)
         except Exception as e:
             self._error("Data Export Error", f"Could not convert layer features to GeoJSON format:\n{e}")
             return
 
         msg = f"Server started on port {port}. Layer features loaded successfully."
-        self.iface.messageBar().pushSuccess("PlanX Urban Procedural 3D", msg)
-        if self.dialog:
-            self.dialog.set_status(msg)
+        if crs_is_geographic:
+            msg += " WARNING: Geographic CRS detected (degrees)."
+            self.iface.messageBar().pushWarning("PlanX Urban Procedural 3D", msg)
+            if self.dialog:
+                self.dialog.set_status(msg, error=True)
+        else:
+            self.iface.messageBar().pushSuccess("PlanX Urban Procedural 3D", msg)
+            if self.dialog:
+                self.dialog.set_status(msg)
 
         # 3. Open Browser
         if launch:

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.5] - 2026-05-30
+
+- Perfecting procedural engine with memory cleanup, CRS validation, and hover effects
+
 ## [0.1.4] - 2026-05-30
 
 - Premium visual enhancements, day/night cycle, solar orbits, animated traffic, compliance linear gauges, and screenshot exporter
