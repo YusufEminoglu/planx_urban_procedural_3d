@@ -116,8 +116,8 @@ class PlanXUrbanProcedural3D:
                 geojson_dict["crs_is_geographic"] = crs_is_geographic
                 geojson_str = json.dumps(geojson_dict)
             except Exception as json_err:
-                from qgis.core import QgsMessageLog
-                QgsMessageLog.logMessage(f"Failed to inject CRS info: {json_err}", "PlanX", QgsMessageLog.Warning)
+                from qgis.core import QgsMessageLog, Qgis
+                QgsMessageLog.logMessage(f"Failed to inject CRS info: {json_err}", "PlanX", Qgis.Warning)
 
             self.server.update_geojson(geojson_str)
         except Exception as e:

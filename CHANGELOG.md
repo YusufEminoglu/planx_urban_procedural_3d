@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.6] - 2026-05-30
+
+- Fix QgsMessageLog logMessage level constant to Qgis.Warning
+
 ## [0.1.5] - 2026-05-30
 
 - Perfecting procedural engine with memory cleanup, CRS validation, and hover effects
