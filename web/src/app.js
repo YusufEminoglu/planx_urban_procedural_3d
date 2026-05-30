@@ -1460,9 +1460,9 @@ function getBuildingMaterials(usage, floors) {
         colorHex = '#334155'; // professional slate civic facade
     }
 
-    const textures = createFacadeTextures(colorHex, usage);
-    textures.map.repeat.set(6, floors);
-    textures.emissiveMap.repeat.set(6, floors);
+    const textures = createFacadeTextures(colorHex, usage, floors);
+    textures.map.repeat.set(6, 1);
+    textures.emissiveMap.repeat.set(6, 1);
 
     const tVal = parseFloat(inTime.value);
     const isNight = tVal < 7.5 || tVal > 19.5;
@@ -1487,78 +1487,118 @@ function getBuildingMaterials(usage, floors) {
 }
 
 // Canvas-drawn texture mapping for realistic windows with randomized emissive maps
-function createFacadeTextures(wallColor, usage) {
+function createFacadeTextures(wallColor, usage, floors) {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
-    canvas.height = 256;
+    canvas.height = 512;
     const ctx = canvas.getContext('2d');
 
     const emCanvas = document.createElement('canvas');
     emCanvas.width = 256;
-    emCanvas.height = 256;
+    emCanvas.height = 512;
     const emCtx = emCanvas.getContext('2d');
 
     // Draw base wall
     ctx.fillStyle = wallColor;
-    ctx.fillRect(0, 0, 256, 256);
+    ctx.fillRect(0, 0, 256, 512);
 
     // Emissive base is black (no glow on walls)
     emCtx.fillStyle = '#000000';
-    emCtx.fillRect(0, 0, 256, 256);
+    emCtx.fillRect(0, 0, 256, 512);
 
-    const isCommercial = usage === 'Commercial' || usage === 'MixedUse';
+    const isCommercial = usage === 'Commercial';
+    const isMixedUse = usage === 'MixedUse';
     const isCivic = usage === 'Civic';
     
     // Window design details
     ctx.strokeStyle = '#1e293b';
-    ctx.lineWidth = 2;
+    ctx.lineWidth = 1.5;
 
-    const cols = 6;
-    const rows = 3;
-    const w = 28;
-    const h = 55;
-    const gapX = (256 - cols * w) / (cols + 1);
-    const gapY = (256 - rows * h) / (rows + 1);
+    const cols = 4;
+    const sliceH = 512 / floors;
 
-    for (let r = 0; r < rows; r++) {
-        const isGround = (r === rows - 1);
+    for (let f = 0; f < floors; f++) {
+        const isGroundFloor = (f === floors - 1);
+        const yStart = f * sliceH;
         
+        // Window dimensions
+        const winW = 32;
+        const winH = Math.min(sliceH * 0.7, 40);
+        const gapX = (256 - cols * winW) / (cols + 1);
+        const gapY = (sliceH - winH) / 2;
+
         for (let c = 0; c < cols; c++) {
-            const x = gapX + c * (w + gapX);
-            const y = gapY + r * (h + gapY);
+            const x = gapX + c * (winW + gapX);
+            const y = yStart + gapY;
 
-            if (isGround && (c === 2 || c === 3)) {
-                // Entrance door
-                ctx.fillStyle = '#1e293b';
-                ctx.fillRect(x, y, w, h + gapY);
-                ctx.fillStyle = '#93c5fd';
-                ctx.fillRect(x + 4, y + 4, w - 8, h / 2);
-                
-                // Emissive door
-                emCtx.fillStyle = '#000000';
-                emCtx.fillRect(x, y, w, h + gapY);
+            if (isGroundFloor) {
+                // Ground floor: retail shopfronts for MixedUse/Commercial, doors for others
+                if (isMixedUse || isCommercial) {
+                    // Glass shopfront (large windows)
+                    ctx.fillStyle = '#7dd3fc'; // light sky blue glass
+                    ctx.fillRect(x, yStart + 2, winW, sliceH - 4);
+                    ctx.strokeRect(x, yStart + 2, winW, sliceH - 4);
+                    
+                    // Lit up shop window at night
+                    const isLit = Math.random() < 0.8;
+                    if (isLit) {
+                        ctx.fillStyle = '#bae6fd';
+                        ctx.fillRect(x + 2, yStart + 4, winW - 4, sliceH - 8);
+                        emCtx.fillStyle = '#bae6fd';
+                        emCtx.fillRect(x + 2, yStart + 4, winW - 4, sliceH - 8);
+                    }
+                } else {
+                    // Entrance doors in center columns
+                    if (c === 1 || c === 2) {
+                        ctx.fillStyle = '#3f220f'; // dark wood
+                        ctx.fillRect(x, yStart + 2, winW, sliceH - 2);
+                        ctx.strokeRect(x, yStart + 2, winW, sliceH - 2);
+                        
+                        ctx.fillStyle = '#fef08a';
+                        ctx.fillRect(x + 6, yStart + 8, winW - 12, sliceH * 0.3);
+                        
+                        const isLit = Math.random() < 0.7;
+                        if (isLit) {
+                            emCtx.fillStyle = '#fef08a';
+                            emCtx.fillRect(x + 6, yStart + 8, winW - 12, sliceH * 0.3);
+                        }
+                    } else {
+                        // Ground floor side window
+                        ctx.fillStyle = '#1e293b';
+                        ctx.fillRect(x, y, winW, winH);
+                        ctx.strokeRect(x, y, winW, winH);
+                        
+                        const isLit = Math.random() < 0.45;
+                        if (isLit) {
+                            ctx.fillStyle = '#fef08a';
+                            ctx.fillRect(x + 2, y + 2, winW - 4, winH - 4);
+                            emCtx.fillStyle = '#fef08a';
+                            emCtx.fillRect(x + 2, y + 2, winW - 4, winH - 4);
+                        }
+                    }
+                }
             } else {
-                // Window glass
-                ctx.fillStyle = isCommercial ? '#1e3a8a' : (isCivic ? '#115e59' : '#3f3f46');
-                ctx.fillRect(x, y, w, h);
-                ctx.strokeRect(x, y, w, h);
+                // Upper floors
+                ctx.fillStyle = (isCommercial || isMixedUse) ? '#1e3a8a' : (isCivic ? '#115e59' : '#3f3f46');
+                ctx.fillRect(x, y, winW, winH);
+                ctx.strokeRect(x, y, winW, winH);
 
-                // Window subdivisions
                 ctx.beginPath();
-                ctx.moveTo(x + w / 2, y);
-                ctx.lineTo(x + w / 2, y + h);
-                ctx.moveTo(x, y + h / 2);
-                ctx.lineTo(x + w, y + h / 2);
+                ctx.moveTo(x + winW / 2, y);
+                ctx.lineTo(x + winW / 2, y + winH);
+                ctx.moveTo(x, y + winH / 2);
+                ctx.lineTo(x + winW, y + winH / 2);
                 ctx.stroke();
 
-                // Randomize window state: 45% chance of being lit
                 const isLit = Math.random() < 0.45;
                 if (isLit) {
-                    ctx.fillStyle = isCommercial ? '#93c5fd' : '#fef08a';
-                    ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
+                    const litColor = (isCommercial || isMixedUse) ? '#93c5fd' : '#fef08a';
+                    const emColor = (isCommercial || isMixedUse) ? '#60a5fa' : '#fef08a';
                     
-                    emCtx.fillStyle = isCommercial ? '#60a5fa' : '#fef08a';
-                    emCtx.fillRect(x + 2, y + 2, w - 4, h - 4);
+                    ctx.fillStyle = litColor;
+                    ctx.fillRect(x + 2, y + 2, winW - 4, winH - 4);
+                    emCtx.fillStyle = emColor;
+                    emCtx.fillRect(x + 2, y + 2, winW - 4, winH - 4);
                 }
             }
         }

@@ -1,13 +1,17 @@
 # Changelog
 
+## [0.2.8] - 2026-05-31
+
+- Implement realistic procedural mixed-use storefront ground floors and entrance doors
+
+## [0.2.8] - 2026-05-31
+
+- Implement realistic procedural mixed-use storefront ground floors and entrance doors
+- Prevent door rendering on upper floors by using vertical non-repeating building facade textures
+
 ## [0.2.7] - 2026-05-31
 
-- Implement procedural roof styles (Hipped, Gable, Mansard, Flat) and PodiumTower integration
-
-## [0.2.7] - 2026-05-31
-
-- Implement procedural roof generator functions (Hipped, Gable, Mansard, Flat) in Web 3D Cockpit
-- Update rebuildParcel3D to support selected roof style dynamically for both PodiumTower and standard building typologies
+- Implement procedural roof styles (Hipped, Gable, Mansard, Flat) in Web 3D Cockpit and PodiumTower integration
 
 ## [0.2.6] - 2026-05-30
 
