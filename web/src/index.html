@@ -1,0 +1,128 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>PlanX Urban Procedural 3D</title>
+    <link rel="stylesheet" href="style.css">
+    <script type="importmap">
+        {
+            "imports": {
+                "three": "../assets/vendor/three/build/three.module.js",
+                "three/addons/": "../assets/vendor/three/examples/jsm/"
+            }
+        }
+    </script>
+</head>
+<body>
+    <div id="loading" class="loading-screen">
+        <div class="spinner"></div>
+        <h2>PlanX Urban Procedural 3D</h2>
+        <p id="loading-text">Katman verisi yükleniyor...</p>
+    </div>
+
+    <!-- 3D Canvas Viewport -->
+    <div id="viewport"></div>
+
+    <!-- Control Cockpit Dock -->
+    <div id="control-dock" class="glass-panel">
+        <div class="dock-header">
+            <h3>Parametrik Tasarım</h3>
+        </div>
+
+        <div id="selection-placeholder" class="dock-note">
+            Lütfen düzenlemek için 3D sahneden bir parsele tıklayın.
+        </div>
+
+        <div id="editor-controls" class="hidden">
+            <div class="stat-row">
+                <span>Parsel ID:</span>
+                <span id="prop-fid" class="stat-val">-</span>
+            </div>
+            <div class="stat-row">
+                <span>Parsel Alanı:</span>
+                <span id="prop-area" class="stat-val">- m²</span>
+            </div>
+
+            <hr class="divider">
+
+            <div class="control-group">
+                <label>Bina Tipolojisi
+                    <select id="input-typology">
+                        <option value="Tower">Kule (Tower)</option>
+                        <option value="Slab">Sıra/Blok (Slab)</option>
+                        <option value="Courtyard">Avlu (Courtyard)</option>
+                    </select>
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label>Fonksiyon
+                    <select id="input-usage">
+                        <option value="Residential">Konut (Residential)</option>
+                        <option value="Commercial">Ticaret (Commercial)</option>
+                        <option value="Civic">Kamu/Sosyal (Civic)</option>
+                    </select>
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label>Çekme Mesafesi: <span id="val-setback">3.0</span> m
+                    <input type="range" id="input-setback" min="0" max="10" step="0.5" value="3.0">
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label>Kat Adedi: <span id="val-floors">4</span>
+                    <input type="range" id="input-floors" min="1" max="25" step="1" value="4">
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label>Kat Yüksekliği: <span id="val-floorheight">3.0</span> m
+                    <input type="range" id="input-floorheight" min="2.5" max="4.5" step="0.1" value="3.0">
+                </label>
+            </div>
+
+            <hr class="divider">
+
+            <div class="dock-header">
+                <h4>İmar Göstergeleri</h4>
+            </div>
+
+            <div class="stat-row">
+                <span>Taban Alanı (TAKS):</span>
+                <span id="metric-footprint" class="stat-val">- m²</span>
+            </div>
+            <div class="stat-row">
+                <span>Top. İnşaat (KAKS/GFA):</span>
+                <span id="metric-gfa" class="stat-val">- m²</span>
+            </div>
+            <div class="stat-row">
+                <span>TAKS Oranı (BCR):</span>
+                <span id="metric-bcr" class="stat-val">-</span>
+            </div>
+            <div class="stat-row">
+                <span>KAKS Oranı (FAR):</span>
+                <span id="metric-far" class="stat-val">-</span>
+            </div>
+
+            <div class="stat-row">
+                <span>Zoning Durumu:</span>
+                <span id="metric-status" class="stat-val status-badge compliant">Uyumlu</span>
+            </div>
+
+            <button id="btn-sync" class="sync-button">QGIS ile Senkronize Et</button>
+        </div>
+    </div>
+
+    <!-- HUD Indicators -->
+    <div class="hud-bar glass-panel">
+        <div class="hud-chip">PlanX Urban Procedural 3D</div>
+        <div class="hud-chip">Toplam Parsel: <span id="hud-total-parcels">0</span></div>
+        <div class="hud-chip">Projeksiyon: <span id="hud-crs">UTM</span></div>
+    </div>
+
+    <script type="module" src="app.js"></script>
+</body>
+</html>

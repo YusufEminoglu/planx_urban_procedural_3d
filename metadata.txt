@@ -1,0 +1,26 @@
+[general]
+name=PlanX Urban Procedural 3D
+qgisMinimumVersion=3.28
+qgisMaximumVersion=3.99
+description=Parametric 3D urban design and procedural planning toolbox with Modelur-style feedback loops.
+version=0.1.0
+author=Yusuf Eminoglu
+email=yusuf.eminoglu@deu.edu.tr
+
+about=PlanX Urban Procedural 3D is an interactive parametric design tool for QGIS. It enables planners to select parcel/block boundaries, open a local Three.js 3D editor, adjust setbacks, building heights, and typologies live in the browser, and sync the generated geometry and compliance metrics back into the QGIS project. Developed with feedback from educational workflows at Dokuz Eylul University, Department of City and Regional Planning.
+
+tracker=https://github.com/YusufEminoglu/planx_urban_procedural_3d/issues
+repository=https://github.com/YusufEminoglu/planx_urban_procedural_3d
+homepage=https://github.com/YusufEminoglu/planx_urban_procedural_3d
+
+category=Vector
+tags=planx,qgis,dialog,planx,urban,procedural,3d,zoning,parametric,modelling
+icon=icons/icon.png
+
+experimental=False
+deprecated=False
+hasProcessingProvider=no
+license=GPL-3
+
+changelog=
+    PlanX Urban Procedural 3D 0.1.0 - Initial release.
