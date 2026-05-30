@@ -48,7 +48,7 @@
             if (loading) loading.style.display = 'none';
         };
     </script>
-    <link rel="stylesheet" href="style.css?v=0.2.5">
+    <link rel="stylesheet" href="style.css?v=0.2.7">
     <script type="importmap">
         {
             "imports": {
@@ -122,6 +122,17 @@
                         <option value="MixedUse">Mixed-Use (Retail + Residential)</option>
                         <option value="Civic">Civic / Institutional</option>
                         <option value="Park">Public Park</option>
+                    </select>
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label>Roof Style
+                    <select id="input-roof-style">
+                        <option value="Flat">Flat (with Helipad & HVAC)</option>
+                        <option value="Hipped">Hipped (Clay Tiles)</option>
+                        <option value="Gable">Gable (Classic Slanted)</option>
+                        <option value="Mansard">Mansard (French Slate)</option>
                     </select>
                 </label>
             </div>
@@ -288,6 +299,6 @@
         </div>
     </div>
 
-    <script type="module" src="app.js?v=0.2.5"></script>
+    <script type="module" src="app.js?v=0.2.7"></script>
 </body>
 </html>

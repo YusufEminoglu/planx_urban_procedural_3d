@@ -171,7 +171,8 @@ class PlanXUrbanProcedural3D:
                 "typology": "string",
                 "max_bcr": "double",
                 "max_far": "double",
-                "max_height": "double"
+                "max_height": "double",
+                "roof_style": "string"
             }
             
             # Check if fields exist, create them if not (before starting edit session)
@@ -209,6 +210,7 @@ class PlanXUrbanProcedural3D:
                 max_bcr_val = float(item.get("max_bcr", 0.45))
                 max_far_val = float(item.get("max_far", 2.5))
                 max_height_val = float(item.get("max_height", 18.0))
+                roof_style_val = str(item.get("roof_style", "Flat"))
                 coords = item.get("coordinates", [])
 
                 # Update attributes
@@ -223,6 +225,7 @@ class PlanXUrbanProcedural3D:
                 self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("max_bcr"), max_bcr_val)
                 self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("max_far"), max_far_val)
                 self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("max_height"), max_height_val)
+                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("roof_style"), roof_style_val)
 
                 # Optional: Update geometry if coords are sent back (setback footprint)
                 if coords and len(coords) >= 3:

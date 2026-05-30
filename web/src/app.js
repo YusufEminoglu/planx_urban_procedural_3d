@@ -46,6 +46,7 @@ const toggleGridEl = document.getElementById('toggle-grid');
 // Input controls
 const inTypology = document.getElementById('input-typology');
 const inUsage = document.getElementById('input-usage');
+const inRoofStyle = document.getElementById('input-roof-style');
 const inSetback = document.getElementById('input-setback');
 const inFloors = document.getElementById('input-floors');
 const inFloorHeight = document.getElementById('input-floorheight');
@@ -339,6 +340,7 @@ function setupInputListeners() {
         selectedParcel.params.floorHeight = parseFloat(inFloorHeight.value);
         selectedParcel.params.typology = inTypology.value;
         selectedParcel.params.usage = inUsage.value;
+        selectedParcel.params.roofStyle = inRoofStyle.value;
         
         // Zoning limits
         selectedParcel.params.maxBcr = parseFloat(inMaxBcr.value);
@@ -372,6 +374,7 @@ function setupInputListeners() {
     inFloorHeight.addEventListener('input', triggerUpdate);
     inTypology.addEventListener('change', triggerUpdate);
     inUsage.addEventListener('change', triggerUpdate);
+    inRoofStyle.addEventListener('change', triggerUpdate);
     
     // Zoning inputs
     inMaxBcr.addEventListener('input', triggerUpdate);
@@ -602,6 +605,7 @@ function parseGeoJSON(data) {
             floorHeight: props.floor_h !== undefined ? parseFloat(props.floor_h) : (props.floor_height !== undefined ? parseFloat(props.floor_height) : 3.0),
             typology: props.typology !== undefined ? props.typology : 'Tower',
             usage: props.usage !== undefined ? props.usage : 'Residential',
+            roofStyle: props.roof_style !== undefined ? props.roof_style : (props.usage === 'Residential' ? 'Hipped' : 'Flat'),
             // Zoning constraints
             maxBcr: props.max_bcr !== undefined ? parseFloat(props.max_bcr) : 0.45,
             maxFar: props.max_far !== undefined ? parseFloat(props.max_far) : 2.5,
@@ -1034,8 +1038,18 @@ function rebuildParcel3D(item) {
         scene.add(group);
         item.buildingMesh = group;
 
-        // Add flat roof details on top
-        addRooftopDetails(towerMesh || podiumMesh, towerRing, height, usage);
+        // Add roof details on top based on roof style selection
+        const topMesh = towerMesh || podiumMesh;
+        const roofStyle = item.params.roofStyle || 'Flat';
+        if (roofStyle === 'Hipped') {
+            buildHippedRoof(topMesh, towerRing, height);
+        } else if (roofStyle === 'Gable') {
+            buildGableRoof(topMesh, towerRing, height);
+        } else if (roofStyle === 'Mansard') {
+            buildMansardRoof(topMesh, towerRing, height);
+        } else {
+            addRooftopDetails(topMesh, towerRing, height, usage);
+        }
 
         footprintPoints = towerRing; // for compliance envelope
     } else { // Tower
@@ -1064,9 +1078,14 @@ function rebuildParcel3D(item) {
         scene.add(bldMesh);
         item.buildingMesh = bldMesh;
 
-        // Add Rooftop Details (Pitched roof for Residential Tower, Slab, L, U; flat otherwise)
-        if (usage === 'Residential' && typology !== 'Courtyard') {
-            buildPitchedRoof(bldMesh, footprintPoints, height);
+        // Add Rooftop based on Roof Style parameter
+        const roofStyle = item.params.roofStyle || 'Flat';
+        if (roofStyle === 'Hipped') {
+            buildHippedRoof(bldMesh, footprintPoints, height);
+        } else if (roofStyle === 'Gable') {
+            buildGableRoof(bldMesh, footprintPoints, height);
+        } else if (roofStyle === 'Mansard') {
+            buildMansardRoof(bldMesh, footprintPoints, height);
         } else {
             addRooftopDetails(bldMesh, footprintPoints, height, usage);
         }
@@ -1556,26 +1575,22 @@ function createFacadeTextures(wallColor, usage) {
     return { map: diffuseTex, emissiveMap: emissiveTex };
 }
 
-// Slanted/Hipped pitched roof generator for Residential typologies
-function buildPitchedRoof(parentMesh, footprintPoints, height) {
-    // 1. Calculate top vertices of building
+// Hipped pitched roof generator with clay tiles
+function buildHippedRoof(parentMesh, footprintPoints, height) {
     const topVerts = footprintPoints.map(pt => new THREE.Vector3(pt.x, height, -pt.y));
     const N = topVerts.length;
 
-    // 2. Calculate top centroid
     let cx = 0, cz = 0;
     topVerts.forEach(v => { cx += v.x; cz += v.z; });
     cx /= N;
     cz /= N;
-    const topCentroid = new THREE.Vector3(cx, height + 4.0, cz); // Ridge elevated by 4.0m
+    const topCentroid = new THREE.Vector3(cx, height + 3.5, cz); // Ridge elevated by 3.5m
 
-    // 3. Build geometry faces using BufferGeometry
     const vertices = [];
     for (let i = 0; i < N; i++) {
         const v1 = topVerts[i];
         const v2 = topVerts[(i + 1) % N];
 
-        // Push triangle: v1, v2, topCentroid
         vertices.push(v1.x, v1.y, v1.z);
         vertices.push(v2.x, v2.y, v2.z);
         vertices.push(topCentroid.x, topCentroid.y, topCentroid.z);
@@ -1595,6 +1610,135 @@ function buildPitchedRoof(parentMesh, footprintPoints, height) {
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     parentMesh.add(mesh);
+}
+
+// Gable roof generator aligned with OBB longitudinal axis
+function buildGableRoof(parentMesh, footprintPoints, height) {
+    const ob = getOrientedBounds(footprintPoints);
+    const N = footprintPoints.length;
+
+    const midY = (ob.minY + ob.maxY) / 2;
+    const ridgeH = 3.5; // height of the ridge above building roof height
+
+    const topVerts = footprintPoints.map(pt => new THREE.Vector3(pt.x, height, -pt.y));
+
+    // For each footprint vertex, project it onto the ridge line
+    const ridgeVerts = footprintPoints.map(pt => {
+        const rx = pt.x - ob.cx;
+        const ry = pt.y - ob.cy;
+        const lx = rx * ob.ux + ry * ob.uy;
+        // Project to the center line of the OBB along local Y
+        const rx_proj = lx * ob.ux + midY * ob.nx;
+        const ry_proj = lx * ob.uy + midY * ob.ny;
+        return new THREE.Vector3(ob.cx + rx_proj, height + ridgeH, -(ob.cy + ry_proj));
+    });
+
+    const vertices = [];
+    for (let i = 0; i < N; i++) {
+        const v1 = topVerts[i];
+        const v2 = topVerts[(i + 1) % N];
+        const vr1 = ridgeVerts[i];
+        const vr2 = ridgeVerts[(i + 1) % N];
+
+        // Triangle 1
+        vertices.push(v1.x, v1.y, v1.z);
+        vertices.push(v2.x, v2.y, v2.z);
+        vertices.push(vr2.x, vr2.y, vr2.z);
+
+        // Triangle 2
+        vertices.push(v1.x, v1.y, v1.z);
+        vertices.push(vr2.x, vr2.y, vr2.z);
+        vertices.push(vr1.x, vr1.y, vr1.z);
+    }
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geom.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x475569, // slate grey
+        roughness: 0.65,
+        side: THREE.DoubleSide
+    });
+
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    parentMesh.add(mesh);
+}
+
+// Mansard roof generator with steep sides and a flat top cap
+function buildMansardRoof(parentMesh, footprintPoints, height) {
+    const slopeH = 2.0; // Height of the steep slope
+    const topH = height + slopeH;
+    const insetVal = 1.5; // Inset distance for the top flat cap
+
+    // Calculate inset points using offsetPolygonRing
+    const innerRing = offsetPolygonRing(footprintPoints, insetVal);
+    if (!innerRing || innerRing.length < 3) {
+        // Fallback to hipped if offset fails
+        buildHippedRoof(parentMesh, footprintPoints, height);
+        return;
+    }
+
+    const N = footprintPoints.length;
+    const topVerts = footprintPoints.map(pt => new THREE.Vector3(pt.x, height, -pt.y));
+    const innerVerts = innerRing.map(pt => new THREE.Vector3(pt.x, topH, -pt.y));
+
+    // 1. Build the steep outer sloped facets
+    const vertices = [];
+    for (let i = 0; i < N; i++) {
+        const v1 = topVerts[i];
+        const v2 = topVerts[(i + 1) % N];
+        const vi1 = innerVerts[i % innerRing.length];
+        const vi2 = innerVerts[(i + 1) % innerRing.length];
+
+        // Triangle 1: v1, v2, vi2
+        vertices.push(v1.x, v1.y, v1.z);
+        vertices.push(v2.x, v2.y, v2.z);
+        vertices.push(vi2.x, vi2.y, vi2.z);
+
+        // Triangle 2: v1, vi2, vi1
+        vertices.push(v1.x, v1.y, v1.z);
+        vertices.push(vi2.x, vi2.y, vi2.z);
+        vertices.push(vi1.x, vi1.y, vi1.z);
+    }
+
+    const slopeGeom = new THREE.BufferGeometry();
+    slopeGeom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    slopeGeom.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x334155, // French slate blue/grey
+        roughness: 0.7,
+        side: THREE.DoubleSide
+    });
+
+    const slopeMesh = new THREE.Mesh(slopeGeom, mat);
+    slopeMesh.castShadow = true;
+    slopeMesh.receiveShadow = true;
+    parentMesh.add(slopeMesh);
+
+    // 2. Build the flat top cap
+    const capShape = new THREE.Shape();
+    innerRing.forEach((pt, i) => {
+        if (i === 0) capShape.moveTo(pt.x, pt.y);
+        else capShape.lineTo(pt.x, pt.y);
+    });
+
+    const capGeom = new THREE.ShapeGeometry(capShape);
+    capGeom.rotateX(-Math.PI / 2);
+    capGeom.translate(0, topH, 0);
+
+    const capMat = new THREE.MeshStandardMaterial({
+        color: 0x1e293b, // dark flat cap roof
+        roughness: 0.8
+    });
+
+    const capMesh = new THREE.Mesh(capGeom, capMat);
+    capMesh.castShadow = true;
+    capMesh.receiveShadow = true;
+    parentMesh.add(capMesh);
 }
 
 // Flat roof details (helipad, HVAC boxes, beacon lights)
@@ -1878,6 +2022,7 @@ function selectParcel(item) {
     inFloorHeight.value = item.params.floorHeight;
     inTypology.value = item.params.typology;
     inUsage.value = item.params.usage;
+    inRoofStyle.value = item.params.roofStyle || 'Flat';
     
     // Zoning sliders
     inMaxBcr.value = item.params.maxBcr;
@@ -2152,6 +2297,7 @@ async function syncToQGIS() {
             max_bcr: item.params.maxBcr,
             max_far: item.params.maxFar,
             max_height: item.params.maxHeight,
+            roof_style: item.params.roofStyle || 'Flat',
             coordinates: geoCoords
         };
     });
@@ -2409,6 +2555,7 @@ function applyToAllParcels() {
         `Apply the current design parameters to all ${parcelFeatures.length} parcels?\n\n` +
         `Typology: ${templateParams.typology}\n` +
         `Usage: ${templateParams.usage}\n` +
+        `Roof Style: ${templateParams.roofStyle || 'Flat'}\n` +
         `Floors: ${templateParams.floors}\n` +
         `Floor Height: ${templateParams.floorHeight}m\n` +
         `Setback: ${templateParams.setback}m\n\n` +
@@ -2427,6 +2574,7 @@ function applyToAllParcels() {
         item.params.floorHeight = templateParams.floorHeight;
         item.params.typology = templateParams.typology;
         item.params.usage = templateParams.usage;
+        item.params.roofStyle = templateParams.roofStyle;
         item.params.maxBcr = templateParams.maxBcr;
         item.params.maxFar = templateParams.maxFar;
         item.params.maxHeight = templateParams.maxHeight;

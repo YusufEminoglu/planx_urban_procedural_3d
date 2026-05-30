@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.2.7] - 2026-05-31
+
+- Implement procedural roof styles (Hipped, Gable, Mansard, Flat) and PodiumTower integration
+
+## [0.2.7] - 2026-05-31
+
+- Implement procedural roof generator functions (Hipped, Gable, Mansard, Flat) in Web 3D Cockpit
+- Update rebuildParcel3D to support selected roof style dynamically for both PodiumTower and standard building typologies
+
 ## [0.2.6] - 2026-05-30
 
 - Re-bump cache-buster tags in index.html to v0.2.6
