@@ -331,6 +331,8 @@ function setupInputListeners() {
     const triggerUpdate = () => {
         if (!selectedParcel) return;
         
+        selectedParcel.modified = true;
+
         // Read slider values
         selectedParcel.params.setback = parseFloat(inSetback.value);
         selectedParcel.params.floors = parseInt(inFloors.value);
@@ -612,6 +614,7 @@ function parseGeoJSON(data) {
             outerRing: localPoints,
             area,
             params,
+            modified: false,
             parcelMesh: null,
             buildingMesh: null,
             setbackMesh: null,
@@ -2065,40 +2068,95 @@ function captureViewport() {
 
 // POST modifications back to the local Python QGIS server
 async function syncToQGIS() {
-    if (!selectedParcel) return;
+    let modifiedParcels = parcelFeatures.filter(item => item.modified);
+    
+    // Fallback: If no parcels are flagged as modified, but one is selected, sync that selected one
+    if (modifiedParcels.length === 0 && selectedParcel) {
+        selectedParcel.modified = true;
+        modifiedParcels = [selectedParcel];
+    }
+    
+    if (modifiedParcels.length === 0) {
+        alert("No modifications to synchronize. Select a parcel and adjust sliders first.");
+        return;
+    }
 
     btnSync.disabled = true;
     btnSync.textContent = "Syncing...";
 
-    const setback = selectedParcel.params.setback;
-    const insetRing = offsetPolygonRing(selectedParcel.outerRing, setback);
-    
-    let geoCoords = [];
-    if (insetRing) {
-        geoCoords = insetRing.map(pt => {
-            return [pt.x + centerX, pt.y + centerY];
-        });
-    }
-
-    const payload = {
-        updates: [
-            {
-                id: selectedParcel.fid,
-                far: parseFloat(metFarLabel.textContent.split(" / ")[0]),
-                bcr: parseFloat(metBcrLabel.textContent.split(" / ")[0]),
-                gfa: parseFloat(metGfa.textContent.replace(/\D/g, '')),
-                setback: selectedParcel.params.setback,
-                floors: selectedParcel.params.floors,
-                floor_h: selectedParcel.params.floorHeight,
-                typology: selectedParcel.params.typology,
-                usage: selectedParcel.params.usage,
-                max_bcr: selectedParcel.params.maxBcr,
-                max_far: selectedParcel.params.maxFar,
-                max_height: selectedParcel.params.maxHeight,
-                coordinates: geoCoords
+    const updates = modifiedParcels.map(item => {
+        const setback = item.params.setback;
+        const insetRing = offsetPolygonRing(item.outerRing, setback);
+        
+        let geoCoords = [];
+        if (insetRing) {
+            geoCoords = insetRing.map(pt => {
+                return [pt.x + centerX, pt.y + centerY];
+            });
+        }
+        
+        // Calculate FAR and BCR actuals based on geometry typology
+        let footprintArea = 0;
+        let gfa = 0;
+        const height = item.params.floors * item.params.floorHeight;
+        
+        if (item.params.usage !== 'Park') {
+            if (item.params.typology === 'Courtyard') {
+                const innerSetback = 8;
+                const innerRing = offsetPolygonRing(insetRing, innerSetback);
+                const outerArea = calculatePolygonArea(insetRing);
+                const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
+                footprintArea = Math.max(0, outerArea - innerArea);
+                gfa = footprintArea * item.params.floors;
+            } else if (item.params.typology === 'Slab') {
+                const slabShape = buildSlabShape(insetRing, 12);
+                footprintArea = calculateShapeArea(slabShape);
+                gfa = footprintArea * item.params.floors;
+            } else if (item.params.typology === 'LShape') {
+                const lShape = buildLShape(insetRing, 12);
+                footprintArea = calculateShapeArea(lShape);
+                gfa = footprintArea * item.params.floors;
+            } else if (item.params.typology === 'UShape') {
+                const uShape = buildUShape(insetRing, 12);
+                footprintArea = calculateShapeArea(uShape);
+                gfa = footprintArea * item.params.floors;
+            } else if (item.params.typology === 'PodiumTower') {
+                const podiumH = Math.min(height, 2 * item.params.floorHeight);
+                const towerH = Math.max(0, height - podiumH);
+                const podiumArea = calculatePolygonArea(insetRing);
+                const towerRing = offsetPolygonRing(insetRing, 3.5) || insetRing;
+                const towerArea = calculatePolygonArea(towerRing);
+                const podiumFloors = Math.round(podiumH / item.params.floorHeight);
+                const towerFloors = Math.round(towerH / item.params.floorHeight);
+                footprintArea = podiumArea;
+                gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
+            } else { // Tower
+                footprintArea = calculatePolygonArea(insetRing);
+                gfa = footprintArea * item.params.floors;
             }
-        ]
-    };
+        }
+        
+        const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
+        const far = item.area > 0 ? (gfa / item.area) : 0;
+        
+        return {
+            id: item.fid,
+            far: parseFloat(far.toFixed(2)),
+            bcr: parseFloat(bcr.toFixed(2)),
+            gfa: Math.round(gfa),
+            setback: item.params.setback,
+            floors: item.params.floors,
+            floor_h: item.params.floorHeight,
+            typology: item.params.typology,
+            usage: item.params.usage,
+            max_bcr: item.params.maxBcr,
+            max_far: item.params.maxFar,
+            max_height: item.params.maxHeight,
+            coordinates: geoCoords
+        };
+    });
+
+    const payload = { updates };
 
     try {
         const response = await fetch('/sync', {
@@ -2111,7 +2169,8 @@ async function syncToQGIS() {
 
         const res = await response.json();
         if (res.status === 'ok') {
-            alert("Successfully synced modifications back to QGIS!");
+            modifiedParcels.forEach(item => { item.modified = false; });
+            alert(`Successfully synced ${modifiedParcels.length} parcel modifications back to QGIS!`);
         } else {
             alert("Synchronization failed:\n" + res.message);
         }
@@ -2362,6 +2421,7 @@ function applyToAllParcels() {
     btnApplyAll.textContent = 'Applying...';
 
     parcelFeatures.forEach(item => {
+        item.modified = true;
         item.params.setback = templateParams.setback;
         item.params.floors = templateParams.floors;
         item.params.floorHeight = templateParams.floorHeight;

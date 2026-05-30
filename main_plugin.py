@@ -174,10 +174,7 @@ class PlanXUrbanProcedural3D:
                 "max_height": "double"
             }
             
-            # Start editing
-            self.active_layer.startEditing()
-            
-            provider = self.active_layer.dataProvider()
+            # Check if fields exist, create them if not (before starting edit session)
             existing_fields = [f.name() for f in self.active_layer.fields()]
             
             from qgis.PyQt.QtCore import QVariant
@@ -193,8 +190,11 @@ class PlanXUrbanProcedural3D:
                         fields_to_create.append(QgsField(name, QVariant.String))
             
             if fields_to_create:
-                provider.addAttributes(fields_to_create)
+                self.active_layer.dataProvider().addAttributes(fields_to_create)
                 self.active_layer.updateFields()
+            
+            # Start editing
+            self.active_layer.startEditing()
 
             for item in updates:
                 fid = int(item.get("id"))
