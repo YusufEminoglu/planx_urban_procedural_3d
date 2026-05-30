@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.2] - 2026-05-30
+
+- Add missing OutputShader.js required by OutputPass.js
+
 ## [0.2.1] - 2026-05-30
 
 - Implement ThreadingHTTPServer to prevent loading screen hang and auto-project geographic coordinates to EPSG:3857 in Web UI
