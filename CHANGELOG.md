@@ -3,6 +3,18 @@
 All notable changes to **PlanX Urban Procedural 3D** are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
+## [0.1.2] - 2026-05-30
+
+- Purged all third-party trademark names (e.g., Modelur, CityEngine) to establish a unique PlanX branding identity.
+- Added Sunlight Time-of-Day orbit rotation system for solar shadow analysis.
+- Implemented Night Mode transition (dims environments, activates window emissions, and headlight/taillight systems on cars).
+- Added vertical streetlights casting glowing yellow spotlight cones on streets at night.
+- Generated hipped slanted tiled roofs for Residential typologies.
+- Generated circular helipads with warning beacons on Commercial roofs.
+- Created animated low-poly car traffic driving along sidewalk curb routes.
+- Upgraded compliance dashboard to feature styled linear bar gauges for BCR/FAR.
+- Added a high-resolution viewport screenshot exporter.
+
 ## [0.1.1] - 2026-05-30
 
 - Translated all user interface text and labels to English-only.
