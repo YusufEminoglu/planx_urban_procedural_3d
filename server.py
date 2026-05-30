@@ -13,8 +13,12 @@ import threading
 
 class SyncHTTPRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        # Suppress logging to console to keep QGIS python console clean
-        pass
+        try:
+            log_file = os.path.join(os.path.dirname(__file__), "server_debug.log")
+            with open(log_file, "a", encoding="utf-8") as f:
+                f.write(f"[{self.log_date_time_string()}] {self.address_string()} - {format % args}\n")
+        except Exception:
+            pass
 
     def end_headers(self):
         # Enable CORS for local testing/development
@@ -49,9 +53,9 @@ class SyncHTTPRequestHandler(BaseHTTPRequestHandler):
             
         file_path = os.path.join(self.server.web_dir, clean_path)
         
-        # Security check: do not escape web_dir
-        real_web_dir = os.path.realpath(self.server.web_dir)
-        real_file_path = os.path.realpath(file_path)
+        # Security check: do not escape web_dir (case-insensitive to prevent Windows drive letter mismatch)
+        real_web_dir = os.path.realpath(self.server.web_dir).lower()
+        real_file_path = os.path.realpath(file_path).lower()
         if not real_file_path.startswith(real_web_dir):
             self.send_error(403, "Access Denied")
             return

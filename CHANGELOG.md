@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.8] - 2026-05-30
+
+- Fix case-insensitive path mismatch for static file security check on Windows
+
 ## [0.1.7] - 2026-05-30
 
 - Correct QgsJsonExporter to destination CRS (meters) and handle empty QGIS layers gracefully
