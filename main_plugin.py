@@ -67,26 +67,26 @@ class PlanXUrbanProcedural3D:
         launch = params["launch_browser"]
 
         if not isinstance(layer, QgsVectorLayer):
-            self._error("Hata", "Çalışma katmanı geçerli bir vektör katmanı olmalıdır.")
+            self._error("Error", "Active layer must be a valid vector layer.")
             return
 
         self.active_layer = layer
 
         # Prepare directory paths
-        web_src_dir = os.path.join(self.plugin_dir, "web", "src")
+        web_dir = os.path.join(self.plugin_dir, "web")
         
         # Verify web directory exists
-        if not os.path.exists(web_src_dir):
-            os.makedirs(web_src_dir, exist_ok=True)
+        if not os.path.exists(web_dir):
+            os.makedirs(web_dir, exist_ok=True)
 
         # 1. Start Server
         try:
             if self.server:
                 self.server.stop()
-            self.server = PlanXProceduralServer(port, web_src_dir, self.sync_callback)
+            self.server = PlanXProceduralServer(port, web_dir, self.sync_callback)
             self.server.start()
         except Exception as e:
-            self._error("Sunucu Başlatılamadı", f"Port {port} üzerinde sunucu başlatılamadı:\n{e}")
+            self._error("Server Error", f"Could not start local server on port {port}:\n{e}")
             return
 
         # 2. Export GeoJSON
@@ -100,10 +100,10 @@ class PlanXUrbanProcedural3D:
             geojson_str = exporter.exportFeatures(features)
             self.server.update_geojson(geojson_str)
         except Exception as e:
-            self._error("Veri Aktarım Hatası", f"Katman verisi GeoJSON formatına çevrilemedi:\n{e}")
+            self._error("Data Export Error", f"Could not convert layer features to GeoJSON format:\n{e}")
             return
 
-        msg = f"Sunucu port {port} üzerinde başlatıldı. Veriler aktarıldı."
+        msg = f"Server started on port {port}. Layer features loaded successfully."
         self.iface.messageBar().pushSuccess("PlanX Urban Procedural 3D", msg)
         if self.dialog:
             self.dialog.set_status(msg)
@@ -131,7 +131,10 @@ class PlanXUrbanProcedural3D:
                 "floors": "integer",
                 "usage": "string",
                 "floor_h": "double",
-                "typology": "string"
+                "typology": "string",
+                "max_bcr": "double",
+                "max_far": "double",
+                "max_height": "double"
             }
             
             # Start editing
@@ -166,6 +169,9 @@ class PlanXUrbanProcedural3D:
                 usage_val = str(item.get("usage", "Residential"))
                 floor_h_val = float(item.get("floor_h", 3.0))
                 typology_val = str(item.get("typology", "Tower"))
+                max_bcr_val = float(item.get("max_bcr", 0.45))
+                max_far_val = float(item.get("max_far", 2.5))
+                max_height_val = float(item.get("max_height", 18.0))
                 coords = item.get("coordinates", [])
 
                 # Update attributes
@@ -177,6 +183,9 @@ class PlanXUrbanProcedural3D:
                 self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("usage"), usage_val)
                 self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("floor_h"), floor_h_val)
                 self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("typology"), typology_val)
+                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("max_bcr"), max_bcr_val)
+                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("max_far"), max_far_val)
+                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("max_height"), max_height_val)
 
                 # Optional: Update geometry if coords are sent back (setback footprint)
                 if coords and len(coords) >= 3:

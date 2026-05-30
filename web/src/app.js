@@ -5,13 +5,12 @@ import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 // Application State
 let scene, camera, renderer, controls;
 let raycaster, mouse;
-let parcelFeatures = []; // Array of { fid, properties, outerRing, parcelMesh, buildingMesh, setbackMesh, area, params }
+let parcelFeatures = []; // Array of { fid, properties, outerRing, parcelMesh, buildingMesh, setbackMesh, sidewalkMesh, zoningMesh, area, params }
 let selectedParcel = null;
 
 // Projection variables (local offset)
 let centerX = 0;
 let centerY = 0;
-let totalArea = 0;
 
 // Setup UI Element references
 const loadingEl = document.getElementById('loading');
@@ -25,19 +24,26 @@ const inUsage = document.getElementById('input-usage');
 const inSetback = document.getElementById('input-setback');
 const inFloors = document.getElementById('input-floors');
 const inFloorHeight = document.getElementById('input-floorheight');
+const inMaxBcr = document.getElementById('input-max-bcr');
+const inMaxFar = document.getElementById('input-max-far');
+const inMaxHeight = document.getElementById('input-max-height');
 
 // Label values
 const lblSetback = document.getElementById('val-setback');
 const lblFloors = document.getElementById('val-floors');
 const lblFloorHeight = document.getElementById('val-floorheight');
+const lblMaxBcr = document.getElementById('val-max-bcr');
+const lblMaxFar = document.getElementById('val-max-far');
+const lblMaxHeight = document.getElementById('val-max-height');
 
 // Metrics
 const metFid = document.getElementById('prop-fid');
 const metArea = document.getElementById('prop-area');
 const metFootprint = document.getElementById('metric-footprint');
 const metGfa = document.getElementById('metric-gfa');
-const metBcr = document.getElementById('metric-bcr');
-const metFar = document.getElementById('metric-far');
+const metHeight = document.getElementById('metric-height');
+const metBcrLabel = document.getElementById('metric-bcr-label');
+const metFarLabel = document.getElementById('metric-far-label');
 const metStatus = document.getElementById('metric-status');
 
 // HUD
@@ -48,11 +54,11 @@ const hudCrs = document.getElementById('hud-crs');
 function init() {
     // 1. Scene setup
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0f172a); // Slate-900
+    scene.background = new THREE.Color(0x0a0e17); // Slate-950 Dark Theme
 
     // 2. Camera setup
     camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
-    camera.position.set(0, 150, 250);
+    camera.position.set(0, 180, 280);
 
     // 3. Renderer setup
     renderer = new THREE.WebGLRenderer({ antialias: true });
@@ -65,30 +71,29 @@ function init() {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2 - 0.02; // Don't go below ground
+    controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevents camera from going under ground
 
     // 5. Lighting
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.8);
-    dirLight.position.set(150, 400, 100);
+    const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    dirLight.position.set(200, 450, 150);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
     dirLight.shadow.mapSize.height = 2048;
     dirLight.shadow.camera.near = 0.5;
-    dirLight.shadow.camera.far = 1000;
+    dirLight.shadow.camera.far = 1200;
     
-    // Wide shadow orthographic camera bounds
-    const d = 500;
+    const d = 600;
     dirLight.shadow.camera.left = -d;
     dirLight.shadow.camera.right = d;
     dirLight.shadow.camera.top = d;
     dirLight.shadow.camera.bottom = -d;
     scene.add(dirLight);
 
-    // Helper Grid
-    const grid = new THREE.GridHelper(1000, 100, 0x334155, 0x1e293b);
+    // Grid Floor
+    const grid = new THREE.GridHelper(1200, 120, 0x1e293b, 0x0f172a);
     grid.position.y = -0.05;
     scene.add(grid);
 
@@ -98,7 +103,6 @@ function init() {
     window.addEventListener('click', onDocumentClick);
     window.addEventListener('resize', onWindowResize);
 
-    // Bind slider values
     setupInputListeners();
 
     // 7. Load Data
@@ -132,11 +136,19 @@ function setupInputListeners() {
         selectedParcel.params.floorHeight = parseFloat(inFloorHeight.value);
         selectedParcel.params.typology = inTypology.value;
         selectedParcel.params.usage = inUsage.value;
+        
+        // Zoning limits
+        selectedParcel.params.maxBcr = parseFloat(inMaxBcr.value);
+        selectedParcel.params.maxFar = parseFloat(inMaxFar.value);
+        selectedParcel.params.maxHeight = parseFloat(inMaxHeight.value);
 
         // Update labels
         lblSetback.textContent = selectedParcel.params.setback.toFixed(1);
         lblFloors.textContent = selectedParcel.params.floors;
         lblFloorHeight.textContent = selectedParcel.params.floorHeight.toFixed(1);
+        lblMaxBcr.textContent = selectedParcel.params.maxBcr.toFixed(2);
+        lblMaxFar.textContent = selectedParcel.params.maxFar.toFixed(1);
+        lblMaxHeight.textContent = selectedParcel.params.maxHeight.toFixed(1);
 
         // Rebuild meshes
         rebuildParcel3D(selectedParcel);
@@ -148,6 +160,11 @@ function setupInputListeners() {
     inFloorHeight.addEventListener('input', triggerUpdate);
     inTypology.addEventListener('change', triggerUpdate);
     inUsage.addEventListener('change', triggerUpdate);
+    
+    // Zoning inputs
+    inMaxBcr.addEventListener('input', triggerUpdate);
+    inMaxFar.addEventListener('input', triggerUpdate);
+    inMaxHeight.addEventListener('input', triggerUpdate);
 
     btnSync.addEventListener('click', syncToQGIS);
 }
@@ -156,17 +173,16 @@ function setupInputListeners() {
 async function loadGeoJSON() {
     try {
         const response = await fetch('/data.geojson');
-        if (!response.ok) throw new Error("Veri yuklenemedi");
+        if (!response.ok) throw new Error("Could not load data");
         
         const data = await response.json();
         parseGeoJSON(data);
         
-        // Hide loading
         loadingEl.style.opacity = 0;
         setTimeout(() => loadingEl.classList.add('hidden'), 500);
     } catch (e) {
         console.error(e);
-        document.getElementById('loading-text').innerText = "HATA: Veri yüklenemedi. QGIS bağlantısını kontrol edin.";
+        document.getElementById('loading-text').innerText = "ERROR: Failed to load layer. Verify QGIS server connection.";
     }
 }
 
@@ -205,7 +221,6 @@ function parseGeoJSON(data) {
         const fid = f.id !== undefined ? f.id : idx;
         const props = f.properties || {};
 
-        // Parse outer polygon ring
         let coords = [];
         if (f.geometry.type === 'Polygon') {
             coords = f.geometry.coordinates[0];
@@ -229,7 +244,11 @@ function parseGeoJSON(data) {
             floors: props.floors !== undefined ? parseInt(props.floors) : 4,
             floorHeight: props.floor_h !== undefined ? parseFloat(props.floor_h) : (props.floor_height !== undefined ? parseFloat(props.floor_height) : 3.0),
             typology: props.typology !== undefined ? props.typology : 'Tower',
-            usage: props.usage !== undefined ? props.usage : 'Residential'
+            usage: props.usage !== undefined ? props.usage : 'Residential',
+            // Zoning constraints
+            maxBcr: props.max_bcr !== undefined ? parseFloat(props.max_bcr) : 0.45,
+            maxFar: props.max_far !== undefined ? parseFloat(props.max_far) : 2.5,
+            maxHeight: props.max_height !== undefined ? parseFloat(props.max_height) : 18.0
         };
 
         const item = {
@@ -240,11 +259,13 @@ function parseGeoJSON(data) {
             params,
             parcelMesh: null,
             buildingMesh: null,
-            setbackMesh: null
+            setbackMesh: null,
+            sidewalkMesh: null,
+            zoningMesh: null
         };
 
-        // Render parcel ground and default building
         buildParcelGround(item);
+        buildSidewalk(item);
         rebuildParcel3D(item);
         
         parcelFeatures.push(item);
@@ -266,11 +287,10 @@ function buildParcelGround(item) {
     });
 
     const geom = new THREE.ShapeGeometry(shape);
-    geom.rotateX(-Math.PI / 2); // Flip flat on ground
+    geom.rotateX(-Math.PI / 2);
 
-    // Ground material
     const mat = new THREE.MeshStandardMaterial({
-        color: 0x334155, // slate-700
+        color: 0x1e293b, // slate-800
         roughness: 0.9,
         polygonOffset: true,
         polygonOffsetFactor: 1,
@@ -285,16 +305,56 @@ function buildParcelGround(item) {
 
     // Draw boundary line
     const borderPoints = item.outerRing.map(pt => new THREE.Vector3(pt.x, 0.05, -pt.y));
-    // close loop
     borderPoints.push(borderPoints[0].clone());
     
     const lineGeom = new THREE.BufferGeometry().setFromPoints(borderPoints);
-    const lineMat = new THREE.LineBasicMaterial({ color: 0x64748b, linewidth: 2 });
+    const lineMat = new THREE.LineBasicMaterial({ color: 0x475569, linewidth: 2 });
     const line = new THREE.Line(lineGeom, lineMat);
     scene.add(line);
 }
 
-// Rebuild building massing and setback lines based on params
+// Build concrete sidewalk mesh around the parcel
+function buildSidewalk(item) {
+    if (item.sidewalkMesh) {
+        scene.remove(item.sidewalkMesh);
+        item.sidewalkMesh.geometry.dispose();
+    }
+
+    // Outer sidewalk polygon (shifted 2.0 meters outward)
+    const outerSidewalk = offsetPolygonRing(item.outerRing, -2.0);
+    if (!outerSidewalk) return;
+
+    const shape = new THREE.Shape();
+    outerSidewalk.forEach((pt, i) => {
+        if (i === 0) shape.moveTo(pt.x, pt.y);
+        else shape.lineTo(pt.x, pt.y);
+    });
+
+    // Subtract parcel shape to make a frame
+    const hole = new THREE.Path();
+    item.outerRing.forEach((pt, i) => {
+        if (i === 0) hole.moveTo(pt.x, pt.y);
+        else hole.lineTo(pt.x, pt.y);
+    });
+    shape.holes.push(hole);
+
+    // Extrude sidewalk by 0.15m height
+    const geom = new THREE.ExtrudeGeometry(shape, { depth: 0.15, bevelEnabled: false });
+    geom.rotateX(-Math.PI / 2);
+
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x52525b, // slate-600 concrete
+        roughness: 0.8
+    });
+
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.receiveShadow = true;
+    mesh.position.y = -0.05;
+    scene.add(mesh);
+    item.sidewalkMesh = mesh;
+}
+
+// Rebuild building massing, zoning envelopes, and setback lines based on params
 function rebuildParcel3D(item) {
     // 1. Clear old models
     if (item.buildingMesh) {
@@ -307,6 +367,11 @@ function rebuildParcel3D(item) {
         item.setbackMesh.geometry.dispose();
         item.setbackMesh = null;
     }
+    if (item.zoningMesh) {
+        scene.remove(item.zoningMesh);
+        item.zoningMesh.geometry.dispose();
+        item.zoningMesh = null;
+    }
 
     const setback = item.params.setback;
     const floors = item.params.floors;
@@ -318,7 +383,6 @@ function rebuildParcel3D(item) {
     // 2. Generate Inset Setback Shape
     const insetRing = offsetPolygonRing(item.outerRing, setback);
     if (!insetRing || insetRing.length < 3) {
-        // Setback too large, cannot build!
         drawSetbackErrorLine(item);
         return;
     }
@@ -327,13 +391,47 @@ function rebuildParcel3D(item) {
     const setbackPoints = insetRing.map(pt => new THREE.Vector3(pt.x, 0.1, -pt.y));
     setbackPoints.push(setbackPoints[0].clone());
     const sbGeom = new THREE.BufferGeometry().setFromPoints(setbackPoints);
-    const sbMat = new THREE.LineDashedMaterial({ color: 0x0f766e, dashSize: 2, gapSize: 1.5 });
+    const sbMat = new THREE.LineDashedMaterial({ color: 0x14b8a6, dashSize: 2, gapSize: 1.5 });
     const sbLine = new THREE.Line(sbGeom, sbMat);
     sbLine.computeLineDistances();
     scene.add(sbLine);
     item.setbackMesh = sbLine;
 
-    // 3. Build Building Massing
+    // Calculate footprint area
+    let footprintArea = 0;
+    const envShape = new THREE.Shape();
+    insetRing.forEach((pt, i) => {
+        if (i === 0) envShape.moveTo(pt.x, pt.y);
+        else envShape.lineTo(pt.x, pt.y);
+    });
+
+    if (typology === 'Courtyard') {
+        const innerSetback = 8;
+        const innerRing = offsetPolygonRing(insetRing, innerSetback);
+        const outerArea = calculatePolygonArea(insetRing);
+        const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
+        footprintArea = Math.max(0, outerArea - innerArea);
+    } else if (typology === 'Slab') {
+        const slabShape = buildSlabShape(insetRing, 12);
+        footprintArea = calculateShapeArea(slabShape);
+    } else {
+        footprintArea = calculatePolygonArea(insetRing);
+    }
+
+    const gfa = footprintArea * floors;
+    const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
+    const far = item.area > 0 ? (gfa / item.area) : 0;
+
+    // Check violations
+    const heightViolation = height > item.params.maxHeight;
+    const bcrViolation = bcr > item.params.maxBcr;
+    const farViolation = far > item.params.maxFar;
+    const hasViolation = heightViolation || bcrViolation || farViolation;
+
+    // 3. Build Zoning Envelope (Modelur Style)
+    buildZoningEnvelope(item, insetRing, item.params.maxHeight, hasViolation);
+
+    // 4. Build Building Massing
     const bldShape = new THREE.Shape();
     insetRing.forEach((pt, i) => {
         if (i === 0) bldShape.moveTo(pt.x, pt.y);
@@ -342,8 +440,7 @@ function rebuildParcel3D(item) {
 
     let bldGeom;
     if (typology === 'Courtyard') {
-        // Create an inner courtyard ring
-        const innerSetback = 8; // 8m building depth
+        const innerSetback = 8;
         const innerRing = offsetPolygonRing(insetRing, innerSetback);
         if (innerRing && innerRing.length >= 3) {
             const hole = new THREE.Path();
@@ -355,35 +452,197 @@ function rebuildParcel3D(item) {
         }
         bldGeom = new THREE.ExtrudeGeometry(bldShape, { depth: height, bevelEnabled: false });
     } else if (typology === 'Slab') {
-        // Draw a long block along longest axis
-        const slabShape = buildSlabShape(insetRing, 12); // 12m slab depth
+        const slabShape = buildSlabShape(insetRing, 12);
         bldGeom = new THREE.ExtrudeGeometry(slabShape, { depth: height, bevelEnabled: false });
-    } else { // Tower
+    } else {
         bldGeom = new THREE.ExtrudeGeometry(bldShape, { depth: height, bevelEnabled: false });
     }
 
-    bldGeom.rotateX(-Math.PI / 2); // Lay flat
-    bldGeom.translate(0, height, 0); // lift up so pivot is at base
+    bldGeom.rotateX(-Math.PI / 2);
+    bldGeom.translate(0, height, 0);
 
-    // Map function to color
-    let color = 0xf59e0b; // Yellow (Residential)
-    if (usage === 'Commercial') color = 0xef4444; // Red
-    else if (usage === 'Civic') color = 0x3b82f6; // Blue
+    // Generate Facade Window Texture
+    const mats = getBuildingMaterials(usage, floors);
 
-    const mat = new THREE.MeshStandardMaterial({
-        color: color,
-        roughness: 0.6,
-        metalness: 0.1,
-        transparent: true,
-        opacity: selectedParcel === item ? 0.95 : 0.85
-    });
-
-    const bldMesh = new THREE.Mesh(bldGeom, mat);
+    const bldMesh = new THREE.Mesh(bldGeom, mats);
     bldMesh.castShadow = true;
     bldMesh.receiveShadow = true;
     bldMesh.userData = { parcelItem: item };
     scene.add(bldMesh);
     item.buildingMesh = bldMesh;
+
+    // Add Rooftop Details (penthouses, HVAC, solar panels)
+    addRooftopDetails(bldMesh, insetRing, height, usage);
+}
+
+// Generate textured building materials with window grids dynamically
+function getBuildingMaterials(usage, floors) {
+    let colorHex = '#e2e8f0';
+    if (usage === 'Residential') {
+        colorHex = '#d97706'; // warm amber
+    } else if (usage === 'Commercial') {
+        colorHex = '#1d4ed8'; // blue glass
+    } else if (usage === 'Civic') {
+        colorHex = '#0d9488'; // teal civic
+    }
+
+    const wallTex = createFacadeTexture(colorHex, usage);
+    // scale texture repetition to match height/floors
+    wallTex.repeat.set(6, floors);
+
+    const wallMat = new THREE.MeshStandardMaterial({
+        map: wallTex,
+        roughness: 0.3,
+        metalness: 0.1
+    });
+
+    const roofMat = new THREE.MeshStandardMaterial({
+        color: 0x334155, // concrete grey roof
+        roughness: 0.8
+    });
+
+    // In Three.js ExtrudeGeometry, index 0 is for caps, index 1 is for sides (walls)
+    return [roofMat, wallMat];
+}
+
+// Canvas-drawn texture mapping for realistic windows
+function createFacadeTexture(wallColor, usage) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 256;
+    canvas.height = 256;
+    const ctx = canvas.getContext('2d');
+
+    // Draw wall base
+    ctx.fillStyle = wallColor;
+    ctx.fillRect(0, 0, 256, 256);
+
+    // Draw Window Grids
+    const isCommercial = usage === 'Commercial';
+    ctx.fillStyle = isCommercial ? '#93c5fd' : '#fef08a'; // cyan glass vs yellow light
+    ctx.strokeStyle = '#1e293b';
+    ctx.lineWidth = 2;
+
+    const cols = 6;
+    const rows = 3;
+    const w = 28;
+    const h = 55;
+    const gapX = (256 - cols * w) / (cols + 1);
+    const gapY = (256 - rows * h) / (rows + 1);
+
+    for (let r = 0; r < rows; r++) {
+        // Ground floor gets storefronts/doors
+        const isGround = (r === rows - 1);
+        
+        for (let c = 0; c < cols; c++) {
+            const x = gapX + c * (w + gapX);
+            const y = gapY + r * (h + gapY);
+
+            if (isGround && (c === 2 || c === 3)) {
+                // Entrance door
+                ctx.fillStyle = '#1e293b';
+                ctx.fillRect(x, y, w, h + gapY);
+                // Glass panel inside door
+                ctx.fillStyle = '#93c5fd';
+                ctx.fillRect(x + 4, y + 4, w - 8, h / 2);
+                ctx.fillStyle = isCommercial ? '#93c5fd' : '#fef08a';
+            } else {
+                ctx.fillRect(x, y, w, h);
+                ctx.strokeRect(x, y, w, h);
+
+                // Window subdivisions
+                ctx.beginPath();
+                ctx.moveTo(x + w / 2, y);
+                ctx.lineTo(x + w / 2, y + h);
+                ctx.moveTo(x, y + h / 2);
+                ctx.lineTo(x + w, y + h / 2);
+                ctx.stroke();
+            }
+        }
+    }
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.wrapS = THREE.RepeatWrapping;
+    texture.wrapT = THREE.RepeatWrapping;
+    return texture;
+}
+
+// Rooftop elements (HVAC units, elevator penthouses, solar panels)
+function addRooftopDetails(parentMesh, insetRing, height, usage) {
+    // Calculate centroid of the footprint
+    let cx = 0, cy = 0;
+    insetRing.forEach(pt => { cx += pt.x; cy += pt.y; });
+    cx /= insetRing.length;
+    cy /= insetRing.length;
+
+    // Penthouse/elevator shaft
+    const pentGeom = new THREE.BoxGeometry(6, 3, 6);
+    const pentMat = new THREE.MeshStandardMaterial({ color: 0x475569 });
+    const penthouse = new THREE.Mesh(pentGeom, pentMat);
+    // position at centroid
+    penthouse.position.set(cx, height + 1.5, -cy);
+    penthouse.castShadow = true;
+    parentMesh.add(penthouse);
+
+    // HVAC boxes
+    const hvacGeom = new THREE.BoxGeometry(2, 1.2, 2);
+    const hvacMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.9, roughness: 0.2 });
+    for (let i = 0; i < 2; i++) {
+        const hvac = new THREE.Mesh(hvacGeom, hvacMat);
+        hvac.position.set(cx - 5 + i * 10, height + 0.6, -cy + 5);
+        hvac.castShadow = true;
+        parentMesh.add(hvac);
+    }
+
+    // Solar panels
+    if (usage !== 'Residential') {
+        const panelGeom = new THREE.BoxGeometry(3, 0.1, 1.6);
+        const panelMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.1 });
+        for (let i = -1; i <= 1; i++) {
+            const panel = new THREE.Mesh(panelGeom, panelMat);
+            panel.rotation.x = -Math.PI / 6; // Angle tilt
+            panel.position.set(cx + i * 4, height + 0.5, -cy - 5);
+            panel.castShadow = true;
+            parentMesh.add(panel);
+        }
+    }
+}
+
+// 3D Semi-transparent Wireframe Zoning Envelope
+function buildZoningEnvelope(item, insetRing, maxHeight, isViolated) {
+    const envShape = new THREE.Shape();
+    insetRing.forEach((pt, i) => {
+        if (i === 0) envShape.moveTo(pt.x, pt.y);
+        else envShape.lineTo(pt.x, pt.y);
+    });
+
+    const envGeom = new THREE.ExtrudeGeometry(envShape, { depth: maxHeight, bevelEnabled: false });
+    envGeom.rotateX(-Math.PI / 2);
+    envGeom.translate(0, maxHeight, 0);
+
+    const envColor = isViolated ? 0xef4444 : 0x10b981; // neon red if violation, neon green if compliant
+    const envMat = new THREE.MeshStandardMaterial({
+        color: envColor,
+        transparent: true,
+        opacity: isViolated ? 0.25 : 0.08,
+        side: THREE.DoubleSide,
+        depthWrite: false,
+        wireframe: false
+    });
+
+    const envMesh = new THREE.Mesh(envGeom, envMat);
+    scene.add(envMesh);
+    item.zoningMesh = envMesh;
+
+    // Structural outline edges
+    const edges = new THREE.EdgesGeometry(envGeom);
+    const lineMat = new THREE.LineBasicMaterial({
+        color: envColor,
+        linewidth: 1.5,
+        transparent: true,
+        opacity: isViolated ? 0.7 : 0.35
+    });
+    const line = new THREE.LineSegments(edges, lineMat);
+    envMesh.add(line);
 }
 
 // Draw a red guideline if setback is too large to fit a building footprint
@@ -399,16 +658,13 @@ function drawSetbackErrorLine(item) {
 
 // Click listener to select building and open panel details
 function onDocumentClick(event) {
-    // Avoid clicks on UI container
     if (event.target.closest('#control-dock') || event.target.closest('.hud-bar') || event.target.closest('.loading-screen')) return;
 
-    // Calculate mouse position in normalized device coordinates
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
 
-    // Collect meshes
     const meshes = [];
     parcelFeatures.forEach(item => {
         if (item.parcelMesh) meshes.push(item.parcelMesh);
@@ -428,18 +684,16 @@ function onDocumentClick(event) {
 
 // Handle parcel selection, loading values to sliders
 function selectParcel(item) {
-    // Restore previous selected building color opacity
     if (selectedParcel && selectedParcel.buildingMesh) {
-        selectedParcel.buildingMesh.material.opacity = 0.85;
-        selectedParcel.buildingMesh.material.emissive.setHex(0x000000);
+        selectedParcel.buildingMesh.material[1].opacity = 0.85;
+        selectedParcel.buildingMesh.material[1].emissive.setHex(0x000000);
     }
 
     selectedParcel = item;
     
-    // Highlight new selected
     if (selectedParcel.buildingMesh) {
-        selectedParcel.buildingMesh.material.opacity = 1.0;
-        selectedParcel.buildingMesh.material.emissive.setHex(0x111e0e); // slight glowing green outline/tint
+        selectedParcel.buildingMesh.material[1].opacity = 1.0;
+        selectedParcel.buildingMesh.material[1].emissive.setHex(0x111e0e);
     }
 
     // Populate sliders
@@ -448,11 +702,19 @@ function selectParcel(item) {
     inFloorHeight.value = item.params.floorHeight;
     inTypology.value = item.params.typology;
     inUsage.value = item.params.usage;
+    
+    // Zoning sliders
+    inMaxBcr.value = item.params.maxBcr;
+    inMaxFar.value = item.params.maxFar;
+    inMaxHeight.value = item.params.maxHeight;
 
     // Populate labels
     lblSetback.textContent = item.params.setback.toFixed(1);
     lblFloors.textContent = item.params.floors;
     lblFloorHeight.textContent = item.params.floorHeight.toFixed(1);
+    lblMaxBcr.textContent = item.params.maxBcr.toFixed(2);
+    lblMaxFar.textContent = item.params.maxFar.toFixed(1);
+    lblMaxHeight.textContent = item.params.maxHeight.toFixed(1);
 
     metFid.textContent = item.fid;
     metArea.textContent = Math.round(item.area).toLocaleString() + " m²";
@@ -467,8 +729,8 @@ function selectParcel(item) {
 // Deselect selected parcel and hide controls panel
 function deselectParcel() {
     if (selectedParcel && selectedParcel.buildingMesh) {
-        selectedParcel.buildingMesh.material.opacity = 0.85;
-        selectedParcel.buildingMesh.material.emissive.setHex(0x000000);
+        selectedParcel.buildingMesh.material[1].opacity = 0.85;
+        selectedParcel.buildingMesh.material[1].emissive.setHex(0x000000);
     }
     selectedParcel = null;
 
@@ -476,12 +738,13 @@ function deselectParcel() {
     controlsEl.classList.add('hidden');
 }
 
-// Live calculation of imar dashboard metrics (FAR, BCR, GFA)
+// Live calculation of regulatory compliance metrics (FAR, BCR, Height)
 function updateDashboard(item) {
     const setback = item.params.setback;
     const floors = item.params.floors;
+    const height = floors * item.params.floorHeight;
     
-    // 1. Calculate footprint area
+    // Calculate footprint area
     const insetRing = offsetPolygonRing(item.outerRing, setback);
     let footprintArea = 0;
     
@@ -507,14 +770,24 @@ function updateDashboard(item) {
     // Update UI elements
     metFootprint.textContent = Math.round(footprintArea).toLocaleString() + " m²";
     metGfa.textContent = Math.round(gfa).toLocaleString() + " m²";
-    metBcr.textContent = bcr.toFixed(2);
-    metFar.textContent = far.toFixed(2);
+    metHeight.textContent = height.toFixed(1) + " m";
+    
+    // Actual vs Limit
+    metBcrLabel.textContent = `${bcr.toFixed(2)} / ${item.params.maxBcr.toFixed(2)}`;
+    metFarLabel.textContent = `${far.toFixed(2)} / ${item.params.maxFar.toFixed(2)}`;
+
+    // Set colors of BCR/FAR labels based on violations
+    metBcrLabel.style.color = bcr > item.params.maxBcr ? "#ef4444" : "#10b981";
+    metFarLabel.style.color = far > item.params.maxFar ? "#ef4444" : "#10b981";
+    metHeight.style.color = height > item.params.maxHeight ? "#ef4444" : "#10b981";
 
     // Violation Check
-    // If FAR > 2.5 or BCR > 0.45 or building footprint is zero, violate
-    const violated = far > 2.5 || bcr > 0.45 || footprintArea === 0;
+    const heightViolated = height > item.params.maxHeight;
+    const bcrViolated = bcr > item.params.maxBcr;
+    const farViolated = far > item.params.maxFar;
+    const violated = heightViolated || bcrViolated || farViolated || footprintArea === 0;
     
-    metStatus.textContent = violated ? "LİMİT AŞIMI" : "UYUMLU";
+    metStatus.textContent = violated ? "VIOLATION" : "COMPLIANT";
     metStatus.className = "stat-val status-badge " + (violated ? "violation" : "compliant");
 }
 
@@ -523,9 +796,8 @@ async function syncToQGIS() {
     if (!selectedParcel) return;
 
     btnSync.disabled = true;
-    btnSync.textContent = "Gönderiliyor...";
+    btnSync.textContent = "Syncing...";
 
-    // Translate local coordinates back to georeferenced coordinates
     const setback = selectedParcel.params.setback;
     const insetRing = offsetPolygonRing(selectedParcel.outerRing, setback);
     
@@ -540,14 +812,18 @@ async function syncToQGIS() {
         updates: [
             {
                 id: selectedParcel.fid,
-                far: parseFloat(metFar.textContent),
-                bcr: parseFloat(metBcr.textContent),
+                far: parseFloat(metFarLabel.textContent.split(" / ")[0]),
+                bcr: parseFloat(metBcrLabel.textContent.split(" / ")[0]),
                 gfa: parseFloat(metGfa.textContent.replace(/\D/g, '')),
                 setback: selectedParcel.params.setback,
                 floors: selectedParcel.params.floors,
                 floor_h: selectedParcel.params.floorHeight,
                 typology: selectedParcel.params.typology,
                 usage: selectedParcel.params.usage,
+                // Sync zoning limits too
+                max_bcr: selectedParcel.params.maxBcr,
+                max_far: selectedParcel.params.maxFar,
+                max_height: selectedParcel.params.maxHeight,
                 coordinates: geoCoords
             }
         ]
@@ -564,16 +840,16 @@ async function syncToQGIS() {
 
         const res = await response.json();
         if (res.status === 'ok') {
-            alert("QGIS başarıyla senkronize edildi!");
+            alert("Successfully synced modifications back to QGIS!");
         } else {
-            alert("Senkronizasyon hatası:\n" + res.message);
+            alert("Synchronization failed:\n" + res.message);
         }
     } catch (e) {
         console.error(e);
-        alert("Bağlantı hatası: QGIS eklenti sunucusuna erişilemedi.");
+        alert("Connection error: Could not reach QGIS plugin server.");
     } finally {
         btnSync.disabled = false;
-        btnSync.textContent = "QGIS ile Senkronize Et";
+        btnSync.textContent = "Sync Parameters to QGIS";
     }
 }
 
@@ -599,7 +875,7 @@ function calculateShapeArea(shape) {
 
 // Perform polygon segment corner-bisector offsetting/insetting
 function offsetPolygonRing(ring, distance) {
-    if (distance <= 0.05) return ring.map(pt => { return {x: pt.x, y: pt.y}; });
+    if (Math.abs(distance) <= 0.05) return ring.map(pt => { return {x: pt.x, y: pt.y}; });
 
     const N = ring.length;
     const offsetSegments = [];
@@ -614,7 +890,7 @@ function offsetPolygonRing(ring, distance) {
         const len = Math.sqrt(dx*dx + dy*dy);
         if (len < 0.001) continue;
 
-        // Inward pointing normal (assuming counter-clockwise CCW winding)
+        // Inward pointing normal
         const nx = -dy / len;
         const ny = dx / len;
 
@@ -636,9 +912,10 @@ function offsetPolygonRing(ring, distance) {
 
         const pt = intersectLines(s1.p1, s1.dir, s2.p1, s2.dir);
         if (pt) {
-            // Safety check: ensure the point didn't fly off to infinity
             const d1 = distToSegment(pt, ring[(i - 1 + M) % M], ring[i]);
-            if (d1 > distance * 4) return null; // self-intersection/degenerate
+            // Increase buffer if distance is negative (outward offset)
+            const checkDist = Math.abs(distance);
+            if (d1 > checkDist * 4) return null; // self-intersection/degenerate
             insetRing.push(pt);
         } else {
             insetRing.push({ x: s2.p1.x, y: s2.p1.y });
@@ -651,7 +928,7 @@ function offsetPolygonRing(ring, distance) {
 // Find intersection point of two infinite 2D lines (Point + Direction vector)
 function intersectLines(p1, d1, p2, d2) {
     const denom = d1.x * d2.y - d1.y * d2.x;
-    if (Math.abs(denom) < 0.0001) return null; // parallel
+    if (Math.abs(denom) < 0.0001) return null;
 
     const t = ((p2.x - p1.x) * d2.y - (p2.y - p1.y) * d2.x) / denom;
     return {
@@ -660,7 +937,7 @@ function intersectLines(p1, d1, p2, d2) {
     };
 }
 
-// Distance from point to line segment (for self-intersection guards)
+// Distance from point to line segment
 function distToSegment(p, a, b) {
     const dx = b.x - a.x;
     const dy = b.y - a.y;
@@ -677,7 +954,6 @@ function distToSegment(p, a, b) {
 
 // Generate a rectangular Slab/Row building footprint along the longest side
 function buildSlabShape(ring, width) {
-    // Find the longest segment of the inset ring
     let maxLen = -1;
     let bestStart = null, bestEnd = null;
     const N = ring.length;
@@ -695,31 +971,26 @@ function buildSlabShape(ring, width) {
         }
     }
 
-    // Centroid of the polygon
     let cx = 0, cy = 0;
     ring.forEach(pt => { cx += pt.x; cy += pt.y; });
     cx /= N;
     cy /= N;
 
-    // Direction along the longest segment
     const dx = bestEnd.x - bestStart.x;
     const dy = bestEnd.y - bestStart.y;
     const len = Math.sqrt(dx*dx + dy*dy);
     const ux = dx / len;
     const uy = dy / len;
 
-    // Normal vector
     const nx = -uy;
     const ny = ux;
 
-    // Create Slab shape centered on the polygon centroid
     const slabLength = maxLen * 0.9;
     const shape = new THREE.Shape();
     
     const wHalf = width / 2;
     const lHalf = slabLength / 2;
 
-    // Calculate 4 corners
     const c1x = cx - ux * lHalf - nx * wHalf;
     const c1y = cy - uy * lHalf - ny * wHalf;
 

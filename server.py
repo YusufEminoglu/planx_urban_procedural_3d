@@ -40,8 +40,12 @@ class SyncHTTPRequestHandler(BaseHTTPRequestHandler):
 
         # Serve static assets
         clean_path = url.lstrip("/")
-        if not clean_path or clean_path == "":
-            clean_path = "index.html"
+        if not clean_path or clean_path == "" or clean_path == "index.html":
+            clean_path = "src/index.html"
+        elif clean_path == "app.js":
+            clean_path = "src/app.js"
+        elif clean_path == "style.css":
+            clean_path = "src/style.css"
             
         file_path = os.path.join(self.server.web_dir, clean_path)
         
