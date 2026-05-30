@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.0] - 2026-05-30
+
+- Instantiate HTTPServer synchronously in main thread to propagate port binding errors
+
 ## [0.1.9] - 2026-05-30
 
 - Prevent browser caching with strict headers and version query parameters, and add visual error logger

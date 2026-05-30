@@ -116,11 +116,13 @@ class PlanXProceduralServer:
         self.thread = None
 
     def start(self):
+        # Instantiate HTTPServer in the main thread to catch port binding errors immediately
+        self.httpd = HTTPServer(('127.0.0.1', self.port), SyncHTTPRequestHandler)
+        self.httpd.web_dir = self.web_dir
+        self.httpd.sync_callback = self.sync_callback
+        self.httpd.geojson_data = self.geojson_data
+
         def serve():
-            self.httpd = HTTPServer(('127.0.0.1', self.port), SyncHTTPRequestHandler)
-            self.httpd.web_dir = self.web_dir
-            self.httpd.sync_callback = self.sync_callback
-            self.httpd.geojson_data = self.geojson_data
             self.httpd.serve_forever()
 
         self.thread = threading.Thread(target=serve, daemon=True)
