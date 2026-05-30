@@ -110,6 +110,37 @@ function init() {
     grid.position.y = -0.05;
     scene.add(grid);
 
+    // Build Solar Orbit Arc
+    const arcPoints = [];
+    const radius = 500;
+    const segments = 64;
+    for (let i = 0; i <= segments; i++) {
+        const theta = (i / segments) * Math.PI; // 0 to 180 degrees
+        const x = Math.cos(theta + Math.PI) * radius;
+        const y = Math.sin(theta) * radius;
+        const z = 100;
+        arcPoints.push(new THREE.Vector3(x, y, z));
+    }
+    const arcGeom = new THREE.BufferGeometry().setFromPoints(arcPoints);
+    const arcMat = new THREE.LineDashedMaterial({
+        color: 0xeab308,
+        dashSize: 10,
+        gapSize: 8,
+        transparent: true,
+        opacity: 0.35
+    });
+    const solarArc = new THREE.Line(arcGeom, arcMat);
+    solarArc.computeLineDistances();
+    scene.add(solarArc);
+    window.solarArc = solarArc;
+
+    // Build Sun/Moon Sphere
+    const sunSphereGeom = new THREE.SphereGeometry(10, 16, 16);
+    const sunSphereMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+    const sunSphere = new THREE.Mesh(sunSphereGeom, sunSphereMat);
+    scene.add(sunSphere);
+    window.sunSphere = sunSphere;
+
     // 6. Interaction
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
@@ -221,6 +252,18 @@ function updateSolarPhysics(timeVal) {
     dirLight.position.y = Math.sin(angle) * radius;
     dirLight.position.z = 100;
 
+    // Update Sun/Moon sphere mesh
+    if (window.sunSphere) {
+        window.sunSphere.position.copy(dirLight.position);
+        if (isNight) {
+            window.sunSphere.material.color.setHex(0xe2e8f0); // silver moon
+            window.sunSphere.scale.setScalar(0.75);
+        } else {
+            window.sunSphere.material.color.setHex(0xfef08a); // glowing yellow sun
+            window.sunSphere.scale.setScalar(1.0);
+        }
+    }
+
     if (isNight) {
         // Switch to Dark Midnight Scene background
         scene.background.setHex(0x02040a);
@@ -242,16 +285,14 @@ function updateSolarPhysics(timeVal) {
     parcelFeatures.forEach(item => {
         // Toggle building window glow at night
         if (item.buildingMesh) {
-            const wallMaterial = item.buildingMesh.material[1];
-            if (wallMaterial && wallMaterial.map) {
-                if (isNight) {
-                    wallMaterial.emissive.setHex(0x8c732b); // Glow yellow
-                    wallMaterial.emissiveIntensity = 1.0;
-                } else {
-                    wallMaterial.emissive.setHex(0x000000); // Black/off
-                    wallMaterial.emissiveIntensity = 0.0;
+            item.buildingMesh.traverse(child => {
+                if (child.isMesh && Array.isArray(child.material)) {
+                    const wallMaterial = child.material[1];
+                    if (wallMaterial && wallMaterial.emissiveMap) {
+                        wallMaterial.emissiveIntensity = isNight ? 1.0 : 0.0;
+                    }
                 }
-            }
+            });
         }
 
         // Toggle streetlight bulb visibility
@@ -469,7 +510,7 @@ function buildSidewalk(item) {
         const idx = (i * step) % item.outerRing.length;
         const pt = item.outerRing[idx];
         
-        // Offset light slightly outwards onto sidewalk
+        // Offset light/tree slightly outwards onto sidewalk
         const ptNext = item.outerRing[(idx + 1) % item.outerRing.length];
         const dx = ptNext.x - pt.x;
         const dy = ptNext.y - pt.y;
@@ -481,35 +522,41 @@ function buildSidewalk(item) {
         const lx = pt.x + nx * 1.0;
         const lz = - (pt.y + ny * 1.0);
 
-        // Build streetlight pole
-        const poleGeom = new THREE.CylinderGeometry(0.1, 0.15, 6, 8);
-        const poleMat = new THREE.MeshStandardMaterial({ color: 0x3f3f46, metalness: 0.8 });
-        const pole = new THREE.Mesh(poleGeom, poleMat);
-        pole.position.set(lx, 3, lz);
-        pole.castShadow = true;
-        mesh.add(pole);
+        if (i % 2 === 0) {
+            // Build streetlight pole
+            const poleGeom = new THREE.CylinderGeometry(0.1, 0.15, 6, 8);
+            const poleMat = new THREE.MeshStandardMaterial({ color: 0x3f3f46, metalness: 0.8 });
+            const pole = new THREE.Mesh(poleGeom, poleMat);
+            pole.position.set(lx, 3, lz);
+            pole.castShadow = true;
+            mesh.add(pole);
 
-        // Lamp head Arm
-        const armGeom = new THREE.BoxGeometry(0.2, 0.2, 1.5);
-        const arm = new THREE.Mesh(armGeom, poleMat);
-        arm.position.set(0, 3, 0.5);
-        pole.add(arm);
+            // Lamp head Arm
+            const armGeom = new THREE.BoxGeometry(0.2, 0.2, 1.5);
+            const arm = new THREE.Mesh(armGeom, poleMat);
+            arm.position.set(0, 3, 0.5);
+            pole.add(arm);
 
-        // Glowing light bulb (only visible at night)
-        const bulbGeom = new THREE.SphereGeometry(0.3, 16, 16);
-        const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
-        const bulb = new THREE.Mesh(bulbGeom, bulbMat);
-        bulb.position.set(0, 2.8, 1.2);
-        bulb.userData = { isStreetlightBulb: true };
-        bulb.visible = false; // off by default (daylight)
-        pole.add(bulb);
+            // Glowing light bulb (only visible at night)
+            const bulbGeom = new THREE.SphereGeometry(0.3, 16, 16);
+            const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+            const bulb = new THREE.Mesh(bulbGeom, bulbMat);
+            bulb.position.set(0, 2.8, 1.2);
+            bulb.userData = { isStreetlightBulb: true };
+            bulb.visible = false; // off by default (daylight)
+            pole.add(bulb);
 
-        // Spot light source casting downward
-        const spotLight = new THREE.SpotLight(0xfef08a, 4, 15, Math.PI / 4, 0.5, 1);
-        spotLight.position.set(0, 2.7, 1.2);
-        spotLight.target.position.set(0, 0, 1.2);
-        bulb.add(spotLight);
-        bulb.add(spotLight.target);
+            // Spot light source casting downward
+            const spotLight = new THREE.SpotLight(0xfef08a, 4, 15, Math.PI / 4, 0.5, 1);
+            spotLight.position.set(0, 2.7, 1.2);
+            spotLight.target.position.set(0, 0, 1.2);
+            bulb.add(spotLight);
+            bulb.add(spotLight.target);
+        } else {
+            // Plant a beautiful sidewalk tree
+            const tree = buildLowPolyTree(lx, 0.15, lz, 4 + Math.random() * 2);
+            mesh.add(tree);
+        }
     }
 }
 
@@ -518,7 +565,16 @@ function rebuildParcel3D(item) {
     // 1. Clear old models
     if (item.buildingMesh) {
         scene.remove(item.buildingMesh);
-        item.buildingMesh.geometry.dispose();
+        item.buildingMesh.traverse(child => {
+            if (child.isMesh) {
+                child.geometry.dispose();
+                if (Array.isArray(child.material)) {
+                    child.material.forEach(m => m.dispose());
+                } else if (child.material) {
+                    child.material.dispose();
+                }
+            }
+        });
         item.buildingMesh = null;
     }
     if (item.setbackMesh) {
@@ -556,28 +612,280 @@ function rebuildParcel3D(item) {
     scene.add(sbLine);
     item.setbackMesh = sbLine;
 
-    // Calculate footprint area
+    // Calculate footprint area and construct shape/geometry
     let footprintArea = 0;
-    const envShape = new THREE.Shape();
-    insetRing.forEach((pt, i) => {
-        if (i === 0) envShape.moveTo(pt.x, pt.y);
-        else envShape.lineTo(pt.x, pt.y);
-    });
+    let gfa = 0;
+    let bldGeom = null;
+    let bldMesh = null;
+    let footprintPoints = [];
 
+    // Check if usage is Park
+    if (usage === 'Park') {
+        const parkGroup = new THREE.Group();
+        parkGroup.userData = { parcelItem: item };
+        scene.add(parkGroup);
+        item.buildingMesh = parkGroup;
+
+        // Draw green turf shape
+        const turfShape = new THREE.Shape();
+        insetRing.forEach((pt, i) => {
+            if (i === 0) turfShape.moveTo(pt.x, pt.y);
+            else turfShape.lineTo(pt.x, pt.y);
+        });
+        const turfGeom = new THREE.ExtrudeGeometry(turfShape, { depth: 0.1, bevelEnabled: false });
+        turfGeom.rotateX(-Math.PI / 2);
+        const turfMat = new THREE.MeshStandardMaterial({ color: 0x15803d, roughness: 0.9 });
+        const turfMesh = new THREE.Mesh(turfGeom, turfMat);
+        turfMesh.receiveShadow = true;
+        turfMesh.position.y = 0.02;
+        parkGroup.add(turfMesh);
+
+        // Add walking path: a gravel circle or oval in the center
+        let cx = 0, cy = 0;
+        insetRing.forEach(pt => { cx += pt.x; cy += pt.y; });
+        cx /= insetRing.length;
+        cy /= insetRing.length;
+
+        const pathGeom = new THREE.TorusGeometry(8, 1.5, 8, 24);
+        pathGeom.rotateX(Math.PI / 2);
+        const pathMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.8 });
+        const pathMesh = new THREE.Mesh(pathGeom, pathMat);
+        pathMesh.position.set(cx, 0.13, -cy);
+        pathMesh.receiveShadow = true;
+        parkGroup.add(pathMesh);
+
+        // Add 2 wooden benches around path
+        const benchGeom = new THREE.BoxGeometry(2.5, 0.4, 0.6);
+        const benchMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.7 });
+        const legGeom = new THREE.BoxGeometry(0.2, 0.4, 0.6);
+        const legMat = new THREE.MeshStandardMaterial({ color: 0x18181b, metalness: 0.8 });
+
+        const benchOffsets = [
+            { x: cx - 6, z: -cy - 6, rot: Math.PI / 4 },
+            { x: cx + 6, z: -cy + 6, rot: 5 * Math.PI / 4 }
+        ];
+
+        benchOffsets.forEach(offset => {
+            const bench = new THREE.Group();
+            bench.position.set(offset.x, 0.2, offset.z);
+            bench.rotation.y = offset.rot;
+            
+            const seat = new THREE.Mesh(benchGeom, benchMat);
+            seat.position.y = 0.2;
+            seat.castShadow = true;
+            bench.add(seat);
+
+            const leg1 = new THREE.Mesh(legGeom, legMat);
+            leg1.position.set(-1.0, 0, 0);
+            leg1.castShadow = true;
+            bench.add(leg1);
+
+            const leg2 = new THREE.Mesh(legGeom, legMat);
+            leg2.position.set(1.0, 0, 0);
+            leg2.castShadow = true;
+            bench.add(leg2);
+
+            parkGroup.add(bench);
+        });
+
+        // Add clustered park trees
+        const numParkTrees = Math.min(6, Math.max(3, Math.floor(item.area / 200)));
+        for (let i = 0; i < numParkTrees; i++) {
+            const angle = Math.random() * Math.PI * 2;
+            const dist = 3 + Math.random() * 8;
+            const tx = cx + Math.cos(angle) * dist;
+            const tz = -cy + Math.sin(angle) * dist;
+            
+            const tree = buildLowPolyTree(tx, 0.1, tz, 4 + Math.random() * 3);
+            parkGroup.add(tree);
+        }
+
+        buildZoningEnvelope(item, insetRing, item.params.maxHeight, false);
+        return;
+    }
+
+    // Otherwise, generate building based on Typology
     if (typology === 'Courtyard') {
         const innerSetback = 8;
         const innerRing = offsetPolygonRing(insetRing, innerSetback);
         const outerArea = calculatePolygonArea(insetRing);
         const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
         footprintArea = Math.max(0, outerArea - innerArea);
+        gfa = footprintArea * floors;
+
+        const bldShape = new THREE.Shape();
+        insetRing.forEach((pt, i) => {
+            if (i === 0) bldShape.moveTo(pt.x, pt.y);
+            else bldShape.lineTo(pt.x, pt.y);
+        });
+        if (innerRing && innerRing.length >= 3) {
+            const hole = new THREE.Path();
+            innerRing.forEach((pt, i) => {
+                if (i === 0) hole.moveTo(pt.x, pt.y);
+                else hole.lineTo(pt.x, pt.y);
+            });
+            bldShape.holes.push(hole);
+        }
+        bldGeom = new THREE.ExtrudeGeometry(bldShape, { depth: height, bevelEnabled: false });
+        bldGeom.rotateX(-Math.PI / 2);
+        bldGeom.translate(0, height, 0);
+
+        footprintPoints = insetRing; // approximate pitched roof edge
     } else if (typology === 'Slab') {
         const slabShape = buildSlabShape(insetRing, 12);
         footprintArea = calculateShapeArea(slabShape);
-    } else {
+        gfa = footprintArea * floors;
+
+        bldGeom = new THREE.ExtrudeGeometry(slabShape, { depth: height, bevelEnabled: false });
+        bldGeom.rotateX(-Math.PI / 2);
+        bldGeom.translate(0, height, 0);
+
+        footprintPoints = slabShape.getPoints().map(pt => { return { x: pt.x, y: pt.y }; });
+    } else if (typology === 'LShape') {
+        const lShape = buildLShape(insetRing, 12);
+        footprintArea = calculateShapeArea(lShape);
+        gfa = footprintArea * floors;
+
+        bldGeom = new THREE.ExtrudeGeometry(lShape, { depth: height, bevelEnabled: false });
+        bldGeom.rotateX(-Math.PI / 2);
+        bldGeom.translate(0, height, 0);
+
+        footprintPoints = lShape.getPoints().map(pt => { return { x: pt.x, y: pt.y }; });
+    } else if (typology === 'UShape') {
+        const uShape = buildUShape(insetRing, 12);
+        footprintArea = calculateShapeArea(uShape);
+        gfa = footprintArea * floors;
+
+        bldGeom = new THREE.ExtrudeGeometry(uShape, { depth: height, bevelEnabled: false });
+        bldGeom.rotateX(-Math.PI / 2);
+        bldGeom.translate(0, height, 0);
+
+        footprintPoints = uShape.getPoints().map(pt => { return { x: pt.x, y: pt.y }; });
+    } else if (typology === 'PodiumTower') {
+        const podiumH = Math.min(height, 2 * floorH);
+        const towerH = Math.max(0, height - podiumH);
+
+        const podiumArea = calculatePolygonArea(insetRing);
+        const towerRing = offsetPolygonRing(insetRing, 3.5) || insetRing;
+        const towerArea = calculatePolygonArea(towerRing);
+
+        const podiumFloors = Math.round(podiumH / floorH);
+        const towerFloors = Math.round(towerH / floorH);
+
+        footprintArea = podiumArea;
+        gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
+
+        // Build Podium Mesh
+        const podiumShape = new THREE.Shape();
+        insetRing.forEach((pt, i) => {
+            if (i === 0) podiumShape.moveTo(pt.x, pt.y);
+            else podiumShape.lineTo(pt.x, pt.y);
+        });
+        const podiumGeom = new THREE.ExtrudeGeometry(podiumShape, { depth: podiumH, bevelEnabled: false });
+        podiumGeom.rotateX(-Math.PI / 2);
+        podiumGeom.translate(0, podiumH, 0);
+
+        const matsPodium = getBuildingMaterials(usage, podiumFloors);
+        const podiumMesh = new THREE.Mesh(podiumGeom, matsPodium);
+        podiumMesh.castShadow = true;
+        podiumMesh.receiveShadow = true;
+
+        // Build Tower Mesh
+        let towerMesh = null;
+        if (towerH > 0) {
+            const towerShape = new THREE.Shape();
+            towerRing.forEach((pt, i) => {
+                if (i === 0) towerShape.moveTo(pt.x, pt.y);
+                else towerShape.lineTo(pt.x, pt.y);
+            });
+            const towerGeom = new THREE.ExtrudeGeometry(towerShape, { depth: towerH, bevelEnabled: false });
+            towerGeom.rotateX(-Math.PI / 2);
+            towerGeom.translate(0, height, 0);
+
+            const matsTower = getBuildingMaterials(usage, towerFloors);
+            towerMesh = new THREE.Mesh(towerGeom, matsTower);
+            towerMesh.castShadow = true;
+            towerMesh.receiveShadow = true;
+        }
+
+        const group = new THREE.Group();
+        group.userData = { parcelItem: item };
+        group.add(podiumMesh);
+        if (towerMesh) group.add(towerMesh);
+        scene.add(group);
+        item.buildingMesh = group;
+
+        // Add flat roof details on top
+        addRooftopDetails(towerMesh || podiumMesh, towerRing, height, usage);
+
+        footprintPoints = towerRing; // for compliance envelope
+    } else { // Tower
         footprintArea = calculatePolygonArea(insetRing);
+        gfa = footprintArea * floors;
+
+        const bldShape = new THREE.Shape();
+        insetRing.forEach((pt, i) => {
+            if (i === 0) bldShape.moveTo(pt.x, pt.y);
+            else bldShape.lineTo(pt.x, pt.y);
+        });
+        bldGeom = new THREE.ExtrudeGeometry(bldShape, { depth: height, bevelEnabled: false });
+        bldGeom.rotateX(-Math.PI / 2);
+        bldGeom.translate(0, height, 0);
+
+        footprintPoints = insetRing;
     }
 
-    const gfa = footprintArea * floors;
+    // Standard single-mesh building construction (except PodiumTower which exits/adds directly)
+    if (typology !== 'PodiumTower') {
+        const mats = getBuildingMaterials(usage, floors);
+        bldMesh = new THREE.Mesh(bldGeom, mats);
+        bldMesh.castShadow = true;
+        bldMesh.receiveShadow = true;
+        bldMesh.userData = { parcelItem: item };
+        scene.add(bldMesh);
+        item.buildingMesh = bldMesh;
+
+        // Add Rooftop Details (Pitched roof for Residential Tower, Slab, L, U; flat otherwise)
+        if (usage === 'Residential' && typology !== 'Courtyard') {
+            buildPitchedRoof(bldMesh, footprintPoints, height);
+        } else {
+            addRooftopDetails(bldMesh, footprintPoints, height, usage);
+        }
+
+        // Add Courtyard/Inner garden trees for specific typologies
+        if (typology === 'Courtyard') {
+            let cx = 0, cy = 0;
+            insetRing.forEach(pt => { cx += pt.x; cy += pt.y; });
+            cx /= insetRing.length;
+            cy /= insetRing.length;
+            
+            const courtTree = buildLowPolyTree(cx, 0.05, -cy, 6);
+            bldMesh.add(courtTree);
+        } else if (typology === 'LShape') {
+            const ob = getOrientedBounds(insetRing);
+            const w = Math.min(12, ob.W * 0.5);
+            const h = Math.min(12, ob.H * 0.5);
+            const px = ob.maxX - (ob.W - w) / 2;
+            const py = ob.maxY - (ob.H - h) / 2;
+            const gx = ob.cx + px * ob.ux + py * ob.nx;
+            const gy = ob.cy + px * ob.uy + py * ob.ny;
+            
+            const courtTree = buildLowPolyTree(gx, 0.05, -gy, 5);
+            bldMesh.add(courtTree);
+        } else if (typology === 'UShape') {
+            const ob = getOrientedBounds(insetRing);
+            const w = Math.min(12, ob.W * 0.4);
+            const h = Math.min(12, ob.H * 0.4);
+            const px = (ob.minX + ob.maxX) / 2;
+            const py = ob.maxY - (ob.H - h) / 2;
+            const gx = ob.cx + px * ob.ux + py * ob.nx;
+            const gy = ob.cy + px * ob.uy + py * ob.ny;
+            
+            const courtTree = buildLowPolyTree(gx, 0.05, -gy, 5);
+            bldMesh.add(courtTree);
+        }
+    }
+
     const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
     const far = item.area > 0 ? (gfa / item.area) : 0;
 
@@ -589,79 +897,180 @@ function rebuildParcel3D(item) {
 
     // 3. Build Zoning Envelope
     buildZoningEnvelope(item, insetRing, item.params.maxHeight, hasViolation);
-
-    // 4. Build Building Massing
-    let bldGeom;
-    const bldShape = new THREE.Shape();
-    insetRing.forEach((pt, i) => {
-        if (i === 0) bldShape.moveTo(pt.x, pt.y);
-        else bldShape.lineTo(pt.x, pt.y);
-    });
-
-    if (typology === 'Courtyard') {
-        const innerSetback = 8;
-        const innerRing = offsetPolygonRing(insetRing, innerSetback);
-        if (innerRing && innerRing.length >= 3) {
-            const hole = new THREE.Path();
-            innerRing.forEach((pt, i) => {
-                if (i === 0) hole.moveTo(pt.x, pt.y);
-                else hole.lineTo(pt.x, pt.y);
-            });
-            bldShape.holes.push(hole);
-        }
-        bldGeom = new THREE.ExtrudeGeometry(bldShape, { depth: height, bevelEnabled: false });
-    } else if (typology === 'Slab') {
-        const slabShape = buildSlabShape(insetRing, 12);
-        bldGeom = new THREE.ExtrudeGeometry(slabShape, { depth: height, bevelEnabled: false });
-    } else {
-        bldGeom = new THREE.ExtrudeGeometry(bldShape, { depth: height, bevelEnabled: false });
-    }
-
-    bldGeom.rotateX(-Math.PI / 2);
-    bldGeom.translate(0, height, 0);
-
-    // Generate Facade Window Texture
-    const mats = getBuildingMaterials(usage, floors);
-
-    const bldMesh = new THREE.Mesh(bldGeom, mats);
-    bldMesh.castShadow = true;
-    bldMesh.receiveShadow = true;
-    bldMesh.userData = { parcelItem: item };
-    scene.add(bldMesh);
-    item.buildingMesh = bldMesh;
-
-    // Add Rooftop Details (Hipped slanted roof for Residential, flat with Helipad for Commercial)
-    if (usage === 'Residential' && (typology === 'Tower' || typology === 'Slab')) {
-        buildPitchedRoof(bldMesh, insetRing, height);
-    } else {
-        addRooftopDetails(bldMesh, insetRing, height, usage);
-    }
 }
 
+// ───────────────────────── Low Poly Procedural Vegetation ─────────────────────────
+function buildLowPolyTree(x, y, z, height) {
+    const treeGroup = new THREE.Group();
+    treeGroup.position.set(x, y, z);
+
+    const trunkHeight = height * 0.35;
+    const trunkRadius = trunkHeight * 0.12;
+    const trunkGeom = new THREE.CylinderGeometry(trunkRadius * 0.7, trunkRadius, trunkHeight, 8);
+    const trunkMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
+    const trunk = new THREE.Mesh(trunkGeom, trunkMat);
+    trunk.position.y = trunkHeight / 2;
+    trunk.castShadow = true;
+    treeGroup.add(trunk);
+
+    const foliageHeight = height * 0.65;
+    const foliageMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.8 });
+    
+    // Stacked cones for a neat procedural tree model
+    const numLayers = 3;
+    for (let l = 0; l < numLayers; l++) {
+        const radius = foliageHeight * 0.5 * (1 - l * 0.25);
+        const coneGeom = new THREE.ConeGeometry(radius, foliageHeight * 0.5, 8);
+        const cone = new THREE.Mesh(coneGeom, foliageMat);
+        cone.position.y = trunkHeight + (l * foliageHeight * 0.22) + (foliageHeight * 0.25);
+        cone.castShadow = true;
+        treeGroup.add(cone);
+    }
+
+    return treeGroup;
+}
+
+// ───────────────────────── Oriented Bounding Box Helpers ─────────────────────────
+function getOrientedBounds(ring) {
+    let maxLen = -1;
+    let bestStart = null, bestEnd = null;
+    const N = ring.length;
+    for (let i = 0; i < N; i++) {
+        const p1 = ring[i];
+        const p2 = ring[(i + 1) % N];
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const len = Math.sqrt(dx*dx + dy*dy);
+        if (len > maxLen) {
+            maxLen = len;
+            bestStart = p1;
+            bestEnd = p2;
+        }
+    }
+
+    let cx = 0, cy = 0;
+    ring.forEach(pt => { cx += pt.x; cy += pt.y; });
+    cx /= N;
+    cy /= N;
+
+    const dx = bestEnd.x - bestStart.x;
+    const dy = bestEnd.y - bestStart.y;
+    const len = Math.sqrt(dx*dx + dy*dy);
+    const ux = dx / len;
+    const uy = dy / len;
+
+    const nx = -uy;
+    const ny = ux;
+
+    let minX = Infinity, maxX = -Infinity;
+    let minY = Infinity, maxY = -Infinity;
+
+    ring.forEach(pt => {
+        const rx = pt.x - cx;
+        const ry = pt.y - cy;
+        const projX = rx * ux + ry * uy;
+        const projY = rx * nx + ry * ny;
+        if (projX < minX) minX = projX;
+        if (projX > maxX) maxX = projX;
+        if (projY < minY) minY = projY;
+        if (projY > maxY) maxY = projY;
+    });
+
+    return {
+        cx, cy,
+        ux, uy,
+        nx, ny,
+        minX, maxX,
+        minY, maxY,
+        W: maxX - minX,
+        H: maxY - minY
+    };
+}
+
+function buildLShape(ring, width) {
+    const ob = getOrientedBounds(ring);
+    
+    const w = Math.min(width, ob.W * 0.5);
+    const h = Math.min(width, ob.H * 0.5);
+
+    const shape = new THREE.Shape();
+    
+    const ptsLocal = [
+        { x: ob.minX, y: ob.minY },
+        { x: ob.maxX, y: ob.minY },
+        { x: ob.maxX, y: ob.minY + h },
+        { x: ob.minX + w, y: ob.minY + h },
+        { x: ob.minX + w, y: ob.maxY },
+        { x: ob.minX, y: ob.maxY }
+    ];
+
+    ptsLocal.forEach((pt, i) => {
+        const gx = ob.cx + pt.x * ob.ux + pt.y * ob.nx;
+        const gy = ob.cy + pt.x * ob.uy + pt.y * ob.ny;
+        if (i === 0) shape.moveTo(gx, gy);
+        else shape.lineTo(gx, gy);
+    });
+
+    return shape;
+}
+
+function buildUShape(ring, width) {
+    const ob = getOrientedBounds(ring);
+    
+    const w = Math.min(width, ob.W * 0.4);
+    const h = Math.min(width, ob.H * 0.4);
+
+    const shape = new THREE.Shape();
+
+    const ptsLocal = [
+        { x: ob.minX, y: ob.maxY },
+        { x: ob.minX, y: ob.minY },
+        { x: ob.maxX, y: ob.minY },
+        { x: ob.maxX, y: ob.maxY },
+        { x: ob.maxX - w, y: ob.maxY },
+        { x: ob.maxX - w, y: ob.minY + h },
+        { x: ob.minX + w, y: ob.minY + h },
+        { x: ob.minX + w, y: ob.maxY }
+    ];
+
+    ptsLocal.forEach((pt, i) => {
+        const gx = ob.cx + pt.x * ob.ux + pt.y * ob.nx;
+        const gy = ob.cy + pt.x * ob.uy + pt.y * ob.ny;
+        if (i === 0) shape.moveTo(gx, gy);
+        else shape.lineTo(gx, gy);
+    });
+
+    return shape;
+}
+
+// Generate textured building materials with window grids dynamically
 // Generate textured building materials with window grids dynamically
 function getBuildingMaterials(usage, floors) {
     let colorHex = '#e2e8f0';
     if (usage === 'Residential') {
-        colorHex = '#d97706'; // warm amber
+        colorHex = '#b45309'; // warm corporate amber-brown
     } else if (usage === 'Commercial') {
-        colorHex = '#1d4ed8'; // blue glass
+        colorHex = '#0f172a'; // dark steel corporate facade
     } else if (usage === 'Civic') {
-        colorHex = '#0d9488'; // teal civic
+        colorHex = '#334155'; // professional slate civic facade
     }
 
-    const wallTex = createFacadeTexture(colorHex, usage);
-    wallTex.repeat.set(6, floors);
+    const textures = createFacadeTextures(colorHex, usage);
+    textures.map.repeat.set(6, floors);
+    textures.emissiveMap.repeat.set(6, floors);
 
-    // Get current solar state to toggle window emission immediately on creation
     const tVal = parseFloat(inTime.value);
     const isNight = tVal < 7.5 || tVal > 19.5;
 
     const wallMat = new THREE.MeshStandardMaterial({
-        map: wallTex,
-        roughness: 0.3,
-        metalness: 0.1,
-        emissive: new THREE.Color(isNight ? 0x8c732b : 0x000000),
-        emissiveIntensity: isNight ? 1.0 : 0.0
+        map: textures.map,
+        emissiveMap: textures.emissiveMap,
+        emissive: new THREE.Color(0xffffff),
+        emissiveIntensity: isNight ? 1.0 : 0.0,
+        roughness: 0.4,
+        metalness: 0.2,
+        transparent: true,
+        opacity: 0.85
     });
 
     const roofMat = new THREE.MeshStandardMaterial({
@@ -672,20 +1081,30 @@ function getBuildingMaterials(usage, floors) {
     return [roofMat, wallMat];
 }
 
-// Canvas-drawn texture mapping for realistic windows
-function createFacadeTexture(wallColor, usage) {
+// Canvas-drawn texture mapping for realistic windows with randomized emissive maps
+function createFacadeTextures(wallColor, usage) {
     const canvas = document.createElement('canvas');
     canvas.width = 256;
     canvas.height = 256;
     const ctx = canvas.getContext('2d');
 
-    // Draw wall base
+    const emCanvas = document.createElement('canvas');
+    emCanvas.width = 256;
+    emCanvas.height = 256;
+    const emCtx = emCanvas.getContext('2d');
+
+    // Draw base wall
     ctx.fillStyle = wallColor;
     ctx.fillRect(0, 0, 256, 256);
 
-    // Draw Window Grids
+    // Emissive base is black (no glow on walls)
+    emCtx.fillStyle = '#000000';
+    emCtx.fillRect(0, 0, 256, 256);
+
     const isCommercial = usage === 'Commercial';
-    ctx.fillStyle = isCommercial ? '#93c5fd' : '#fef08a'; // cyan glass vs yellow light
+    const isCivic = usage === 'Civic';
+    
+    // Window design details
     ctx.strokeStyle = '#1e293b';
     ctx.lineWidth = 2;
 
@@ -709,8 +1128,13 @@ function createFacadeTexture(wallColor, usage) {
                 ctx.fillRect(x, y, w, h + gapY);
                 ctx.fillStyle = '#93c5fd';
                 ctx.fillRect(x + 4, y + 4, w - 8, h / 2);
-                ctx.fillStyle = isCommercial ? '#93c5fd' : '#fef08a';
+                
+                // Emissive door
+                emCtx.fillStyle = '#000000';
+                emCtx.fillRect(x, y, w, h + gapY);
             } else {
+                // Window glass
+                ctx.fillStyle = isCommercial ? '#1e3a8a' : (isCivic ? '#115e59' : '#3f3f46');
                 ctx.fillRect(x, y, w, h);
                 ctx.strokeRect(x, y, w, h);
 
@@ -721,20 +1145,35 @@ function createFacadeTexture(wallColor, usage) {
                 ctx.moveTo(x, y + h / 2);
                 ctx.lineTo(x + w, y + h / 2);
                 ctx.stroke();
+
+                // Randomize window state: 45% chance of being lit
+                const isLit = Math.random() < 0.45;
+                if (isLit) {
+                    ctx.fillStyle = isCommercial ? '#93c5fd' : '#fef08a';
+                    ctx.fillRect(x + 2, y + 2, w - 4, h - 4);
+                    
+                    emCtx.fillStyle = isCommercial ? '#60a5fa' : '#fef08a';
+                    emCtx.fillRect(x + 2, y + 2, w - 4, h - 4);
+                }
             }
         }
     }
 
-    const texture = new THREE.CanvasTexture(canvas);
-    texture.wrapS = THREE.RepeatWrapping;
-    texture.wrapT = THREE.RepeatWrapping;
-    return texture;
+    const diffuseTex = new THREE.CanvasTexture(canvas);
+    diffuseTex.wrapS = THREE.RepeatWrapping;
+    diffuseTex.wrapT = THREE.RepeatWrapping;
+
+    const emissiveTex = new THREE.CanvasTexture(emCanvas);
+    emissiveTex.wrapS = THREE.RepeatWrapping;
+    emissiveTex.wrapT = THREE.RepeatWrapping;
+
+    return { map: diffuseTex, emissiveMap: emissiveTex };
 }
 
 // Slanted/Hipped pitched roof generator for Residential typologies
-function buildPitchedRoof(parentMesh, insetRing, height) {
+function buildPitchedRoof(parentMesh, footprintPoints, height) {
     // 1. Calculate top vertices of building
-    const topVerts = insetRing.map(pt => new THREE.Vector3(pt.x, height, -pt.y));
+    const topVerts = footprintPoints.map(pt => new THREE.Vector3(pt.x, height, -pt.y));
     const N = topVerts.length;
 
     // 2. Calculate top centroid
@@ -1026,17 +1465,14 @@ function onDocumentClick(event) {
 
 // Handle parcel selection, loading values to sliders
 function selectParcel(item) {
-    if (selectedParcel && selectedParcel.buildingMesh) {
-        selectedParcel.buildingMesh.material[1].opacity = 0.85;
-        selectedParcel.buildingMesh.material[1].emissive.setHex(0x000000);
+// Handle parcel selection, loading values to sliders
+function selectParcel(item) {
+    if (selectedParcel) {
+        setBuildingHighlight(selectedParcel.buildingMesh, false);
     }
 
     selectedParcel = item;
-    
-    if (selectedParcel.buildingMesh) {
-        selectedParcel.buildingMesh.material[1].opacity = 1.0;
-        selectedParcel.buildingMesh.material[1].emissive.setHex(0x111e0e);
-    }
+    setBuildingHighlight(item.buildingMesh, true);
 
     // Populate sliders
     inSetback.value = item.params.setback;
@@ -1069,14 +1505,36 @@ function selectParcel(item) {
 
 // Deselect selected parcel and hide controls panel
 function deselectParcel() {
-    if (selectedParcel && selectedParcel.buildingMesh) {
-        selectedParcel.buildingMesh.material[1].opacity = 0.85;
-        selectedParcel.buildingMesh.material[1].emissive.setHex(0x000000);
+    if (selectedParcel) {
+        setBuildingHighlight(selectedParcel.buildingMesh, false);
     }
     selectedParcel = null;
 
     placeholderEl.classList.remove('hidden');
     controlsEl.classList.add('hidden');
+}
+
+// Helper to update opacity/emission highlights on building selection
+function setBuildingHighlight(meshOrGroup, isSelected) {
+    if (!meshOrGroup) return;
+    const tVal = parseFloat(inTime.value);
+    const isNight = tVal < 7.5 || tVal > 19.5;
+    
+    meshOrGroup.traverse(child => {
+        if (child.isMesh && Array.isArray(child.material)) {
+            const wallMat = child.material[1];
+            if (wallMat) {
+                wallMat.opacity = isSelected ? 1.0 : 0.85;
+                if (isSelected) {
+                    wallMat.emissive.setHex(0xaaaaaa); // selection highlight tint
+                    wallMat.emissiveIntensity = 1.5;
+                } else {
+                    wallMat.emissive.setHex(0xffffff); // default emissiveMap color
+                    wallMat.emissiveIntensity = isNight ? 1.0 : 0.0;
+                }
+            }
+        }
+    });
 }
 
 // Live calculation of regulatory compliance metrics (FAR, BCR, Height)
@@ -1088,30 +1546,54 @@ function updateDashboard(item) {
     // Calculate footprint area
     const insetRing = offsetPolygonRing(item.outerRing, setback);
     let footprintArea = 0;
+    let gfa = 0;
     
-    if (insetRing && insetRing.length >= 3) {
+    if (item.params.usage === 'Park') {
+        footprintArea = 0;
+        gfa = 0;
+    } else if (insetRing && insetRing.length >= 3) {
         if (item.params.typology === 'Courtyard') {
             const innerSetback = 8;
             const innerRing = offsetPolygonRing(insetRing, innerSetback);
             const outerArea = calculatePolygonArea(insetRing);
             const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
             footprintArea = Math.max(0, outerArea - innerArea);
+            gfa = footprintArea * floors;
         } else if (item.params.typology === 'Slab') {
             const slabShape = buildSlabShape(insetRing, 12);
             footprintArea = calculateShapeArea(slabShape);
+            gfa = footprintArea * floors;
+        } else if (item.params.typology === 'LShape') {
+            const lShape = buildLShape(insetRing, 12);
+            footprintArea = calculateShapeArea(lShape);
+            gfa = footprintArea * floors;
+        } else if (item.params.typology === 'UShape') {
+            const uShape = buildUShape(insetRing, 12);
+            footprintArea = calculateShapeArea(uShape);
+            gfa = footprintArea * floors;
+        } else if (item.params.typology === 'PodiumTower') {
+            const podiumArea = calculatePolygonArea(insetRing);
+            const towerRing = offsetPolygonRing(insetRing, 3.5) || insetRing;
+            const towerArea = calculatePolygonArea(towerRing);
+            const podiumH = Math.min(height, 2 * item.params.floorHeight);
+            const towerH = Math.max(0, height - podiumH);
+            const podiumFloors = Math.round(podiumH / item.params.floorHeight);
+            const towerFloors = Math.round(towerH / item.params.floorHeight);
+            footprintArea = podiumArea;
+            gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
         } else { // Tower
             footprintArea = calculatePolygonArea(insetRing);
+            gfa = footprintArea * floors;
         }
     }
 
-    const gfa = footprintArea * floors;
     const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
     const far = item.area > 0 ? (gfa / item.area) : 0;
 
     // Update UI elements
     metFootprint.textContent = Math.round(footprintArea).toLocaleString() + " m²";
     metGfa.textContent = Math.round(gfa).toLocaleString() + " m²";
-    metHeight.textContent = height.toFixed(1) + " m";
+    metHeight.textContent = item.params.usage === 'Park' ? "0.0 m" : height.toFixed(1) + " m";
     
     // Actual vs Limit Text Labels
     metBcrLabel.textContent = `${bcr.toFixed(2)} / ${item.params.maxBcr.toFixed(2)}`;

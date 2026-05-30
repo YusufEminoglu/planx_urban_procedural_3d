@@ -1,11 +1,15 @@
 # Changelog
 
+## [0.1.3] - 2026-05-30
+
+- Implement advanced typologies, solar orbit arc, sidewalk/courtyard trees, and night window glow
+
 All notable changes to **PlanX Urban Procedural 3D** are documented here.
 Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
 
-## [0.1.2] - 2026-05-30
+## [0.1.3] - 2026-05-30
 
-- Purged all third-party trademark names (e.g., Modelur, CityEngine) to establish a unique PlanX branding identity.
+- Established a unique, professional PlanX branding identity across all user interfaces, descriptions, and code files.
 - Added Sunlight Time-of-Day orbit rotation system for solar shadow analysis.
 - Implemented Night Mode transition (dims environments, activates window emissions, and headlight/taillight systems on cars).
 - Added vertical streetlights casting glowing yellow spotlight cones on streets at night.

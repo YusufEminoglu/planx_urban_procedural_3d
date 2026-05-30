@@ -56,6 +56,9 @@
                         <option value="Tower">Tower</option>
                         <option value="Slab">Slab / Row</option>
                         <option value="Courtyard">Courtyard</option>
+                        <option value="LShape">L-Shape</option>
+                        <option value="UShape">U-Shape</option>
+                        <option value="PodiumTower">Podium Tower</option>
                     </select>
                 </label>
             </div>
@@ -66,6 +69,7 @@
                         <option value="Residential">Residential</option>
                         <option value="Commercial">Commercial</option>
                         <option value="Civic">Civic / Institutional</option>
+                        <option value="Park">Public Park</option>
                     </select>
                 </label>
             </div>
@@ -101,19 +105,19 @@
             </div>
 
             <div class="control-group">
-                <label>Max BCR (T.A.K.S): <span id="val-max-bcr">0.45</span>
+                <label>Max BCR (T.A.K.S) <span class="term-desc">Taban Alanı Kat Sayısı</span>: <span id="val-max-bcr">0.45</span>
                     <input type="range" id="input-max-bcr" min="0.1" max="0.9" step="0.05" value="0.45">
                 </label>
             </div>
 
             <div class="control-group">
-                <label>Max FAR (K.A.K.S): <span id="val-max-far">2.5</span>
+                <label>Max FAR (K.A.K.S) <span class="term-desc">Kat Alanı Kat Sayısı</span>: <span id="val-max-far">2.5</span>
                     <input type="range" id="input-max-far" min="0.5" max="8.0" step="0.1" value="2.5">
                 </label>
             </div>
 
             <div class="control-group">
-                <label>Max Height Limit: <span id="val-max-height">18.0</span> m
+                <label>Max Height Limit (Hmax): <span id="val-max-height">18.0</span> m
                     <input type="range" id="input-max-height" min="3.0" max="100.0" step="1.0" value="18.0">
                 </label>
             </div>

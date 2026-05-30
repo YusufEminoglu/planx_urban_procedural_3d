@@ -118,6 +118,20 @@ class PluginDialog(QDialog):
         root.setContentsMargins(15, 15, 15, 15)
         root.setSpacing(12)
 
+        # Branded Header Card
+        header = QLabel(" PLANX SYSTEM  |  URBAN PROCEDURAL 3D")
+        header.setStyleSheet("""
+            background-color: qlineargradient(x1:0, y1:0, x2:1, y2:0, stop:0 #0f766e, stop:1 #0f172a);
+            color: #f8fafc;
+            font-family: 'Inter', 'Segoe UI', Helvetica, sans-serif;
+            font-size: 13px;
+            font-weight: bold;
+            padding: 12px;
+            border-radius: 6px;
+            border: 1px solid rgba(20, 184, 166, 0.2);
+        """)
+        root.addWidget(header)
+
         self.tabs = QTabWidget()
         self.tabs.addTab(self._build_inputs_tab(), "Input Layer")
         self.tabs.addTab(self._build_options_tab(), "Server Options")

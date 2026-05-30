@@ -368,3 +368,13 @@ input[type="range"]::-webkit-slider-thumb:hover {
     background: rgba(255, 255, 255, 0.05);
     border-color: var(--text-secondary);
 }
+
+.term-desc {
+    font-size: 0.65rem;
+    color: #64748b;
+    font-weight: normal;
+    display: block;
+    margin-top: 2px;
+    letter-spacing: 0.02em;
+    text-transform: uppercase;
+}
