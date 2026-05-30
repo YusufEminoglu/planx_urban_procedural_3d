@@ -4,7 +4,51 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PlanX Urban Procedural 3D Cockpit</title>
-    <link rel="stylesheet" href="style.css">
+    <!-- Visual On-Screen JS Error Catcher -->
+    <script>
+        window.onerror = function(message, source, lineno, colno, error) {
+            const errDiv = document.createElement('div');
+            errDiv.style.position = 'fixed';
+            errDiv.style.top = '0';
+            errDiv.style.left = '0';
+            errDiv.style.width = '100%';
+            errDiv.style.background = '#ef4444';
+            errDiv.style.color = '#ffffff';
+            errDiv.style.padding = '20px';
+            errDiv.style.zIndex = '99999';
+            errDiv.style.fontFamily = 'monospace';
+            errDiv.style.fontSize = '13px';
+            errDiv.style.lineHeight = '1.5';
+            errDiv.style.whiteSpace = 'pre-wrap';
+            errDiv.innerHTML = `<strong>JavaScript Error Detected:</strong><br>${message}<br><br>Source: ${source}<br>Line: ${lineno}, Column: ${colno}`;
+            document.body.appendChild(errDiv);
+            
+            const loading = document.getElementById('loading');
+            if (loading) loading.style.display = 'none';
+            return false;
+        };
+        window.onunhandledrejection = function(event) {
+            const errDiv = document.createElement('div');
+            errDiv.style.position = 'fixed';
+            errDiv.style.top = '0';
+            errDiv.style.left = '0';
+            errDiv.style.width = '100%';
+            errDiv.style.background = '#ef4444';
+            errDiv.style.color = '#ffffff';
+            errDiv.style.padding = '20px';
+            errDiv.style.zIndex = '99999';
+            errDiv.style.fontFamily = 'monospace';
+            errDiv.style.fontSize = '13px';
+            errDiv.style.lineHeight = '1.5';
+            errDiv.style.whiteSpace = 'pre-wrap';
+            errDiv.innerHTML = `<strong>Unhandled Promise Rejection:</strong><br>${event.reason}`;
+            document.body.appendChild(errDiv);
+            
+            const loading = document.getElementById('loading');
+            if (loading) loading.style.display = 'none';
+        };
+    </script>
+    <link rel="stylesheet" href="style.css?v=0.1.9">
     <script type="importmap">
         {
             "imports": {
@@ -244,6 +288,6 @@
         </div>
     </div>
 
-    <script type="module" src="app.js"></script>
+    <script type="module" src="app.js?v=0.1.9"></script>
 </body>
 </html>

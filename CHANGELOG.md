@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.9] - 2026-05-30
+
+- Prevent browser caching with strict headers and version query parameters, and add visual error logger
+
 ## [0.1.8] - 2026-05-30
 
 - Fix case-insensitive path mismatch for static file security check on Windows
