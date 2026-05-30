@@ -1,12 +1,19 @@
 /* app.js - PlanX Urban Procedural 3D */
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+import { OutputPass } from 'three/addons/postprocessing/OutputPass.js';
 
 // Application State
-let scene, camera, renderer, controls;
+let scene, camera, renderer, controls, composer;
 let raycaster, mouse;
 let parcelFeatures = []; // Array of { fid, properties, outerRing, parcelMesh, buildingMesh, setbackMesh, sidewalkMesh, zoningMesh, area, params }
 let selectedParcel = null;
+let skyDome = null;
+let skyUniforms = null;
+let pedestrians = []; // Array of { mesh, path, speed, progress, direction }
 
 // Traffic State
 let trafficCars = []; // Array of { carMesh, roadRing, speed, progress }
@@ -59,34 +66,114 @@ const metStatus = document.getElementById('metric-status');
 const bcrFillEl = document.getElementById('gauge-bcr-fill');
 const farFillEl = document.getElementById('gauge-far-fill');
 
+// Population Estimator elements
+const metUnits = document.getElementById('metric-units');
+const metPopulation = document.getElementById('metric-population');
+const metDensity = document.getElementById('metric-density');
+
+// Apply All button
+const btnApplyAll = document.getElementById('btn-apply-all');
+
 // HUD
 const hudTotalParcels = document.getElementById('hud-total-parcels');
 const hudCrs = document.getElementById('hud-crs');
+
+// Grid reference for toggle
+let gridHelper = null;
 
 // Initialize the 3D scene
 function init() {
     // 1. Scene setup
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0e17);
 
-    // 2. Camera setup
+    // 2. Sky Gradient Dome — procedural shader sphere replacing flat background
+    const skyGeom = new THREE.SphereGeometry(2000, 32, 32);
+    const skyVertShader = `
+        varying vec3 vWorldPosition;
+        void main() {
+            vec4 worldPos = modelMatrix * vec4(position, 1.0);
+            vWorldPosition = worldPos.xyz;
+            gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        }
+    `;
+    const skyFragShader = `
+        uniform vec3 uHorizonColor;
+        uniform vec3 uZenithColor;
+        uniform float uStarIntensity;
+        varying vec3 vWorldPosition;
+
+        // Simple pseudo-random for stars
+        float hash(vec2 p) {
+            return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123);
+        }
+
+        void main() {
+            float h = normalize(vWorldPosition).y;
+            float t = clamp(h, 0.0, 1.0);
+            vec3 sky = mix(uHorizonColor, uZenithColor, t);
+
+            // Star field — tiny bright dots at high elevation
+            if (uStarIntensity > 0.01) {
+                vec3 dir = normalize(vWorldPosition);
+                vec2 starUV = dir.xz / (dir.y + 1.0) * 200.0;
+                float star = hash(floor(starUV));
+                float brightness = step(0.997, star) * uStarIntensity;
+                sky += vec3(brightness);
+            }
+
+            gl_FragColor = vec4(sky, 1.0);
+        }
+    `;
+    skyUniforms = {
+        uHorizonColor: { value: new THREE.Color(0x0a0e27) },
+        uZenithColor:  { value: new THREE.Color(0x020617) },
+        uStarIntensity: { value: 0.0 }
+    };
+    const skyMat = new THREE.ShaderMaterial({
+        vertexShader: skyVertShader,
+        fragmentShader: skyFragShader,
+        uniforms: skyUniforms,
+        side: THREE.BackSide,
+        depthWrite: false
+    });
+    skyDome = new THREE.Mesh(skyGeom, skyMat);
+    scene.add(skyDome);
+
+    // 3. Camera setup
     camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
     camera.position.set(0, 180, 280);
 
-    // 3. Renderer setup
+    // 4. Renderer setup
     renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
     document.getElementById('viewport').appendChild(renderer.domElement);
 
-    // 4. OrbitControls
+    // 5. Post-Processing Bloom
+    composer = new EffectComposer(renderer);
+    const renderPass = new RenderPass(scene, camera);
+    composer.addPass(renderPass);
+    const bloomPass = new UnrealBloomPass(
+        new THREE.Vector2(window.innerWidth, window.innerHeight),
+        0.3,   // strength
+        0.4,   // radius
+        0.85   // threshold
+    );
+    composer.addPass(bloomPass);
+    const outputPass = new OutputPass();
+    composer.addPass(outputPass);
+
+    // 6. OrbitControls
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.maxPolarAngle = Math.PI / 2 - 0.02;
 
-    // 5. Lighting
+    // 7. Lighting
     ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
     scene.add(ambientLight);
 
@@ -105,10 +192,50 @@ function init() {
     dirLight.shadow.camera.bottom = -d;
     scene.add(dirLight);
 
-    // Grid Floor
+    // 8. Ground Terrain Plane with subtle grid texture
+    const groundCanvas = document.createElement('canvas');
+    groundCanvas.width = 512;
+    groundCanvas.height = 512;
+    const gCtx = groundCanvas.getContext('2d');
+    gCtx.fillStyle = '#0f1520';
+    gCtx.fillRect(0, 0, 512, 512);
+    // Draw subtle grid lines — each cell ≈ 10m  (512px / 24 cells ≈ 21px per cell)
+    gCtx.strokeStyle = 'rgba(30, 41, 59, 0.35)';
+    gCtx.lineWidth = 0.5;
+    const cellSize = 512 / 24;
+    for (let i = 0; i <= 24; i++) {
+        const p = i * cellSize;
+        gCtx.beginPath(); gCtx.moveTo(p, 0); gCtx.lineTo(p, 512); gCtx.stroke();
+        gCtx.beginPath(); gCtx.moveTo(0, p); gCtx.lineTo(512, p); gCtx.stroke();
+    }
+    const groundTex = new THREE.CanvasTexture(groundCanvas);
+    groundTex.wrapS = THREE.RepeatWrapping;
+    groundTex.wrapT = THREE.RepeatWrapping;
+    groundTex.repeat.set(10, 10);
+
+    const groundGeom = new THREE.PlaneGeometry(2400, 2400);
+    groundGeom.rotateX(-Math.PI / 2);
+    const groundMat = new THREE.MeshStandardMaterial({
+        map: groundTex,
+        color: 0x111827,
+        roughness: 0.95,
+        metalness: 0.05
+    });
+    const groundMesh = new THREE.Mesh(groundGeom, groundMat);
+    groundMesh.receiveShadow = true;
+    groundMesh.position.y = -0.1;
+    scene.add(groundMesh);
+
+    // Subtle overlay grid (kept for fine detail but semi-transparent)
     const grid = new THREE.GridHelper(1200, 120, 0x1e293b, 0x0f172a);
     grid.position.y = -0.05;
+    grid.material.opacity = 0.4;
+    grid.material.transparent = true;
     scene.add(grid);
+    gridHelper = grid;
+
+    // 9. Atmospheric Fog
+    scene.fog = new THREE.FogExp2(0x0a0e17, 0.0012);
 
     // Build Solar Orbit Arc
     const arcPoints = [];
@@ -141,7 +268,7 @@ function init() {
     scene.add(sunSphere);
     window.sunSphere = sunSphere;
 
-    // 6. Interaction
+    // 10. Interaction
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
     window.addEventListener('click', onDocumentClick);
@@ -149,7 +276,7 @@ function init() {
 
     setupInputListeners();
 
-    // 7. Load Data
+    // 11. Load Data
     loadGeoJSON();
 
     animate();
@@ -165,6 +292,9 @@ function animate() {
     // Update traffic cars positions
     updateTraffic();
 
+    // Update pedestrian positions
+    updatePedestrians();
+
     // Beacon light blinking animation
     const timeSec = Date.now() * 0.005;
     scene.traverse(child => {
@@ -173,7 +303,7 @@ function animate() {
         }
     });
 
-    renderer.render(scene, camera);
+    composer.render();
 }
 
 // Resize handler
@@ -181,6 +311,7 @@ function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
     renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setSize(window.innerWidth, window.innerHeight);
 }
 
 // Set up UI input controls event handlers
@@ -238,6 +369,14 @@ function setupInputListeners() {
 
     btnSync.addEventListener('click', syncToQGIS);
     btnCapture.addEventListener('click', captureViewport);
+
+    // Apply All button
+    if (btnApplyAll) {
+        btnApplyAll.addEventListener('click', applyToAllParcels);
+    }
+
+    // Keyboard shortcuts
+    window.addEventListener('keydown', handleKeyboardShortcuts);
 }
 
 // Update lights and sky theme based on solar time of day
@@ -264,15 +403,30 @@ function updateSolarPhysics(timeVal) {
         }
     }
 
+    // Update sky dome gradient and stars
+    if (skyUniforms) {
+        if (isNight) {
+            skyUniforms.uHorizonColor.value.setHex(0x020208);
+            skyUniforms.uZenithColor.value.setHex(0x000005);
+            skyUniforms.uStarIntensity.value = 0.9;
+        } else {
+            skyUniforms.uHorizonColor.value.setHex(0x0a0e27);
+            skyUniforms.uZenithColor.value.setHex(0x020617);
+            skyUniforms.uStarIntensity.value = 0.0;
+        }
+    }
+
+    // Update atmospheric fog color to match sky
+    if (scene.fog) {
+        scene.fog.color.setHex(isNight ? 0x020208 : 0x0a0e17);
+    }
+
     if (isNight) {
-        // Switch to Dark Midnight Scene background
-        scene.background.setHex(0x02040a);
         ambientLight.color.setHex(0x1e1b4b); // Dim indigo light
         ambientLight.intensity = 0.25;
         dirLight.intensity = 0.05; // Dim moon-like sun
     } else {
         // Daylight Mode
-        scene.background.setHex(0x0a0e17);
         ambientLight.color.setHex(0xffffff);
         ambientLight.intensity = 0.45;
         
@@ -553,11 +707,16 @@ function buildSidewalk(item) {
             bulb.add(spotLight);
             bulb.add(spotLight.target);
         } else {
-            // Plant a beautiful sidewalk tree
-            const tree = buildLowPolyTree(lx, 0.15, lz, 4 + Math.random() * 2);
+            // Plant a beautiful sidewalk tree with random style variety
+            const treeStyles = ['conifer', 'deciduous', 'palm'];
+            const style = treeStyles[Math.floor(Math.random() * treeStyles.length)];
+            const tree = buildLowPolyTree(lx, 0.15, lz, 4 + Math.random() * 2, style);
             mesh.add(tree);
         }
     }
+
+    // Spawn animated pedestrians on the sidewalk
+    spawnSidewalkPedestrians(item, outerSidewalk);
 }
 
 // Rebuild building massing, zoning envelopes, and setback lines based on params
@@ -696,7 +855,9 @@ function rebuildParcel3D(item) {
             const tx = cx + Math.cos(angle) * dist;
             const tz = -cy + Math.sin(angle) * dist;
             
-            const tree = buildLowPolyTree(tx, 0.1, tz, 4 + Math.random() * 3);
+            const parkStyles = ['conifer', 'deciduous', 'deciduous', 'palm'];
+            const style = parkStyles[Math.floor(Math.random() * parkStyles.length)];
+            const tree = buildLowPolyTree(tx, 0.1, tz, 4 + Math.random() * 3, style);
             parkGroup.add(tree);
         }
 
@@ -900,34 +1061,200 @@ function rebuildParcel3D(item) {
 }
 
 // ───────────────────────── Low Poly Procedural Vegetation ─────────────────────────
-function buildLowPolyTree(x, y, z, height) {
+function buildLowPolyTree(x, y, z, height, style) {
+    style = style || 'conifer';
     const treeGroup = new THREE.Group();
     treeGroup.position.set(x, y, z);
 
-    const trunkHeight = height * 0.35;
-    const trunkRadius = trunkHeight * 0.12;
-    const trunkGeom = new THREE.CylinderGeometry(trunkRadius * 0.7, trunkRadius, trunkHeight, 8);
     const trunkMat = new THREE.MeshStandardMaterial({ color: 0x78350f, roughness: 0.9 });
-    const trunk = new THREE.Mesh(trunkGeom, trunkMat);
-    trunk.position.y = trunkHeight / 2;
-    trunk.castShadow = true;
-    treeGroup.add(trunk);
 
-    const foliageHeight = height * 0.65;
-    const foliageMat = new THREE.MeshStandardMaterial({ color: 0x16a34a, roughness: 0.8 });
-    
-    // Stacked cones for a neat procedural tree model
-    const numLayers = 3;
-    for (let l = 0; l < numLayers; l++) {
-        const radius = foliageHeight * 0.5 * (1 - l * 0.25);
-        const coneGeom = new THREE.ConeGeometry(radius, foliageHeight * 0.5, 8);
-        const cone = new THREE.Mesh(coneGeom, foliageMat);
-        cone.position.y = trunkHeight + (l * foliageHeight * 0.22) + (foliageHeight * 0.25);
-        cone.castShadow = true;
-        treeGroup.add(cone);
+    if (style === 'deciduous') {
+        // Deciduous: thicker trunk + noisy sphere canopy
+        const trunkH = height * 0.4;
+        const trunkR = trunkH * 0.1;
+        const trunkGeom = new THREE.CylinderGeometry(trunkR * 0.8, trunkR, trunkH, 8);
+        const trunk = new THREE.Mesh(trunkGeom, trunkMat);
+        trunk.position.y = trunkH / 2;
+        trunk.castShadow = true;
+        treeGroup.add(trunk);
+
+        // Sphere canopy with vertex noise displacement for organic look
+        const canopyRadius = height * 0.38;
+        const canopyGeom = new THREE.IcosahedronGeometry(canopyRadius, 2);
+        const posAttr = canopyGeom.getAttribute('position');
+        for (let i = 0; i < posAttr.count; i++) {
+            const nx = posAttr.getX(i);
+            const ny = posAttr.getY(i);
+            const nz = posAttr.getZ(i);
+            const noise = 1.0 + (Math.random() - 0.5) * 0.3;
+            posAttr.setXYZ(i, nx * noise, ny * noise, nz * noise);
+        }
+        canopyGeom.computeVertexNormals();
+
+        // Varied green hues for deciduous
+        const greens = [0x16a34a, 0x15803d, 0x22c55e, 0x166534];
+        const greenColor = greens[Math.floor(Math.random() * greens.length)];
+        const foliageMat = new THREE.MeshStandardMaterial({ color: greenColor, roughness: 0.85, flatShading: true });
+        const canopy = new THREE.Mesh(canopyGeom, foliageMat);
+        canopy.position.y = trunkH + canopyRadius * 0.7;
+        canopy.castShadow = true;
+        treeGroup.add(canopy);
+
+    } else if (style === 'palm') {
+        // Palm: tall thin trunk + fan leaves radiating from top
+        const trunkH = height * 0.7;
+        const trunkR = height * 0.035;
+        const trunkGeom = new THREE.CylinderGeometry(trunkR * 0.6, trunkR, trunkH, 6);
+        const trunk = new THREE.Mesh(trunkGeom, trunkMat);
+        trunk.position.y = trunkH / 2;
+        trunk.castShadow = true;
+        treeGroup.add(trunk);
+
+        // Fan leaves — elongated flattened cones radiating outward
+        const leafCount = 7;
+        const leafLength = height * 0.45;
+        const leafMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.8, side: THREE.DoubleSide });
+        for (let i = 0; i < leafCount; i++) {
+            const leafGeom = new THREE.ConeGeometry(leafLength * 0.18, leafLength, 4);
+            const leaf = new THREE.Mesh(leafGeom, leafMat);
+            const angle = (i / leafCount) * Math.PI * 2;
+            leaf.position.set(
+                Math.cos(angle) * leafLength * 0.35,
+                trunkH + leafLength * 0.1,
+                Math.sin(angle) * leafLength * 0.35
+            );
+            leaf.rotation.z = Math.cos(angle) * 0.8;
+            leaf.rotation.x = Math.sin(angle) * 0.8;
+            leaf.castShadow = true;
+            treeGroup.add(leaf);
+        }
+
+    } else {
+        // Conifer (default): stacked cones — the classic procedural look
+        const trunkHeight = height * 0.35;
+        const trunkRadius = trunkHeight * 0.12;
+        const trunkGeom = new THREE.CylinderGeometry(trunkRadius * 0.7, trunkRadius, trunkHeight, 8);
+        const trunk = new THREE.Mesh(trunkGeom, trunkMat);
+        trunk.position.y = trunkHeight / 2;
+        trunk.castShadow = true;
+        treeGroup.add(trunk);
+
+        const foliageHeight = height * 0.65;
+        // Vary conifer greens slightly
+        const coniferGreens = [0x16a34a, 0x166534, 0x14532d];
+        const greenColor = coniferGreens[Math.floor(Math.random() * coniferGreens.length)];
+        const foliageMat = new THREE.MeshStandardMaterial({ color: greenColor, roughness: 0.8 });
+        
+        const numLayers = 3;
+        for (let l = 0; l < numLayers; l++) {
+            const radius = foliageHeight * 0.5 * (1 - l * 0.25);
+            const coneGeom = new THREE.ConeGeometry(radius, foliageHeight * 0.5, 8);
+            const cone = new THREE.Mesh(coneGeom, foliageMat);
+            cone.position.y = trunkHeight + (l * foliageHeight * 0.22) + (foliageHeight * 0.25);
+            cone.castShadow = true;
+            treeGroup.add(cone);
+        }
     }
 
     return treeGroup;
+}
+
+// ───────────────────────── Animated Pedestrians ─────────────────────────
+function spawnSidewalkPedestrians(item, sidewalkRing) {
+    if (!sidewalkRing || sidewalkRing.length < 3) return;
+
+    // Build a 3D path from the sidewalk ring midpoints (between parcel and outer edge)
+    const pathPoints = [];
+    for (let i = 0; i < sidewalkRing.length; i++) {
+        const outer = sidewalkRing[i];
+        const inner = item.outerRing[i % item.outerRing.length];
+        // Midpoint of the sidewalk width
+        pathPoints.push({
+            x: (outer.x + inner.x) / 2,
+            z: -((outer.y + inner.y) / 2)
+        });
+    }
+
+    // Spawn 2-3 pedestrians per parcel sidewalk
+    const numPeds = 2 + Math.floor(Math.random() * 2);
+    const clothingColors = [0x3b82f6, 0xef4444, 0xf59e0b, 0x8b5cf6, 0x06b6d4, 0xe11d48, 0x84cc16, 0xf97316];
+
+    for (let i = 0; i < numPeds; i++) {
+        const pedGroup = new THREE.Group();
+
+        // Body: capsule approximation (cylinder + hemispheres)
+        const bodyColor = clothingColors[Math.floor(Math.random() * clothingColors.length)];
+        const bodyMat = new THREE.MeshStandardMaterial({ color: bodyColor, roughness: 0.7 });
+        const bodyGeom = new THREE.CapsuleGeometry(0.2, 0.7, 4, 8);
+        const body = new THREE.Mesh(bodyGeom, bodyMat);
+        body.position.y = 0.75;
+        body.castShadow = true;
+        pedGroup.add(body);
+
+        // Head: small sphere
+        const headGeom = new THREE.SphereGeometry(0.15, 8, 8);
+        const skinColors = [0xf5d6c8, 0xd4a574, 0x8d5524, 0xc68642];
+        const headMat = new THREE.MeshStandardMaterial({ color: skinColors[Math.floor(Math.random() * skinColors.length)], roughness: 0.6 });
+        const head = new THREE.Mesh(headGeom, headMat);
+        head.position.y = 1.3;
+        head.castShadow = true;
+        pedGroup.add(head);
+
+        // Legs: two thin cylinders
+        const legMat = new THREE.MeshStandardMaterial({ color: 0x1e293b, roughness: 0.8 });
+        for (let s = -1; s <= 1; s += 2) {
+            const legGeom = new THREE.CylinderGeometry(0.06, 0.06, 0.4, 6);
+            const leg = new THREE.Mesh(legGeom, legMat);
+            leg.position.set(s * 0.1, 0.2, 0);
+            leg.castShadow = true;
+            pedGroup.add(leg);
+        }
+
+        scene.add(pedGroup);
+
+        pedestrians.push({
+            mesh: pedGroup,
+            path: pathPoints,
+            speed: 0.008 + Math.random() * 0.012,
+            progress: Math.random() * pathPoints.length,
+            direction: Math.random() > 0.5 ? 1 : -1
+        });
+    }
+}
+
+// Update pedestrian positions each frame
+function updatePedestrians() {
+    pedestrians.forEach(ped => {
+        const ring = ped.path;
+        if (!ring || ring.length < 2) return;
+
+        ped.progress += ped.speed * ped.direction;
+        if (ped.progress >= ring.length) ped.progress -= ring.length;
+        if (ped.progress < 0) ped.progress += ring.length;
+
+        const idx1 = Math.floor(ped.progress) % ring.length;
+        const idx2 = (idx1 + 1) % ring.length;
+        const t = ped.progress % 1.0;
+
+        const pt1 = ring[idx1];
+        const pt2 = ring[idx2];
+
+        const x = pt1.x + (pt2.x - pt1.x) * t;
+        const z = pt1.z + (pt2.z - pt1.z) * t;
+
+        ped.mesh.position.set(x, 0.15, z);
+
+        // Face direction of travel
+        const dx = pt2.x - pt1.x;
+        const dz = pt2.z - pt1.z;
+        if (Math.abs(dx) > 0.001 || Math.abs(dz) > 0.001) {
+            ped.mesh.rotation.y = Math.atan2(dx * ped.direction, dz * ped.direction);
+        }
+
+        // Subtle walking bob
+        const bobPhase = Date.now() * 0.008 + ped.progress * 10;
+        ped.mesh.position.y = 0.15 + Math.abs(Math.sin(bobPhase)) * 0.05;
+    });
 }
 
 // ───────────────────────── Oriented Bounding Box Helpers ─────────────────────────
@@ -1044,13 +1371,14 @@ function buildUShape(ring, width) {
 }
 
 // Generate textured building materials with window grids dynamically
-// Generate textured building materials with window grids dynamically
 function getBuildingMaterials(usage, floors) {
     let colorHex = '#e2e8f0';
     if (usage === 'Residential') {
         colorHex = '#b45309'; // warm corporate amber-brown
     } else if (usage === 'Commercial') {
         colorHex = '#0f172a'; // dark steel corporate facade
+    } else if (usage === 'MixedUse') {
+        colorHex = '#1e3a5f'; // teal-blue mixed-use facade
     } else if (usage === 'Civic') {
         colorHex = '#334155'; // professional slate civic facade
     }
@@ -1101,7 +1429,7 @@ function createFacadeTextures(wallColor, usage) {
     emCtx.fillStyle = '#000000';
     emCtx.fillRect(0, 0, 256, 256);
 
-    const isCommercial = usage === 'Commercial';
+    const isCommercial = usage === 'Commercial' || usage === 'MixedUse';
     const isCivic = usage === 'Civic';
     
     // Window design details
@@ -1249,7 +1577,7 @@ function addRooftopDetails(parentMesh, insetRing, height, usage) {
     }
 
     // Commercial Helipad painting
-    if (usage === 'Commercial') {
+    if (usage === 'Commercial' || usage === 'MixedUse') {
         const padGeom = new THREE.CylinderGeometry(5, 5, 0.1, 32);
         
         // Draw Helipad letter canvas texture
@@ -1465,8 +1793,6 @@ function onDocumentClick(event) {
 
 // Handle parcel selection, loading values to sliders
 function selectParcel(item) {
-// Handle parcel selection, loading values to sliders
-function selectParcel(item) {
     if (selectedParcel) {
         setBuildingHighlight(selectedParcel.buildingMesh, false);
     }
@@ -1622,13 +1948,40 @@ function updateDashboard(item) {
     
     metStatus.textContent = violated ? "VIOLATION" : "COMPLIANT";
     metStatus.className = "stat-val status-badge " + (violated ? "violation" : "compliant");
+
+    // ── Population Estimator ──
+    const usage = item.params.usage;
+    let dwellingUnits = 0;
+    let population = 0;
+    const AVG_UNIT_SIZE = 100; // m² per dwelling unit
+    const AVG_PERSONS = 2.8;   // persons per household
+
+    if (usage === 'Residential') {
+        dwellingUnits = Math.floor(gfa / AVG_UNIT_SIZE);
+        population = Math.round(dwellingUnits * AVG_PERSONS);
+    } else if (usage === 'MixedUse') {
+        // Ground floor commercial (assume 1 floor retail), rest residential
+        const residentialGfa = Math.max(0, gfa - footprintArea);
+        dwellingUnits = Math.floor(residentialGfa / AVG_UNIT_SIZE);
+        population = Math.round(dwellingUnits * AVG_PERSONS);
+    } else if (usage === 'Commercial' || usage === 'Civic') {
+        // Estimate workforce: 1 person per 15m² office/commercial
+        dwellingUnits = 0;
+        population = Math.round(gfa / 15);
+    }
+
+    const densityPpHa = item.area > 0 ? Math.round(population / (item.area / 10000)) : 0;
+
+    if (metUnits) metUnits.textContent = usage === 'Park' ? '0' : dwellingUnits.toLocaleString();
+    if (metPopulation) metPopulation.textContent = usage === 'Park' ? '0' : population.toLocaleString();
+    if (metDensity) metDensity.textContent = usage === 'Park' ? '0 pp/ha' : `${densityPpHa.toLocaleString()} pp/ha`;
 }
 
 // Capture current 3D WebGL viewport canvas as a PNG screenshot download
 function captureViewport() {
     try {
-        // Redraw scene
-        renderer.render(scene, camera);
+        // Redraw scene through post-processing pipeline
+        composer.render();
         const dataURL = renderer.domElement.toDataURL('image/png');
         
         const link = document.createElement('a');
@@ -1861,3 +2214,97 @@ function buildSlabShape(ring, width) {
 
 // Start the application
 init();
+
+// ───────────────────────── Keyboard Shortcuts ─────────────────────────
+function handleKeyboardShortcuts(event) {
+    // Ignore shortcuts when typing in inputs
+    if (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT' || event.target.tagName === 'TEXTAREA') return;
+
+    switch (event.key.toLowerCase()) {
+        case 'r': // Reset camera
+            camera.position.set(0, 300, 450);
+            controls.target.set(0, 0, 0);
+            controls.update();
+            break;
+
+        case 'f': // Focus on selected parcel
+            if (selectedParcel && selectedParcel.buildingMesh) {
+                const box = new THREE.Box3().setFromObject(selectedParcel.buildingMesh);
+                const center = box.getCenter(new THREE.Vector3());
+                const size = box.getSize(new THREE.Vector3());
+                const maxDim = Math.max(size.x, size.y, size.z);
+
+                controls.target.copy(center);
+                camera.position.set(
+                    center.x + maxDim * 1.2,
+                    center.y + maxDim * 0.8,
+                    center.z + maxDim * 1.2
+                );
+                controls.update();
+            }
+            break;
+
+        case 'n': // Toggle night mode
+            {
+                const currentTime = parseFloat(inTime.value);
+                const isCurrentlyNight = currentTime < 7.5 || currentTime > 19.5;
+                const newTime = isCurrentlyNight ? 12.0 : 21.0;
+                inTime.value = newTime;
+                const hours = Math.floor(newTime);
+                const mins = (newTime % 1) === 0 ? "00" : "30";
+                lblTime.textContent = `${hours}:${mins}`;
+                updateSolarPhysics(newTime);
+            }
+            break;
+
+        case 'g': // Toggle grid visibility
+            if (gridHelper) {
+                gridHelper.visible = !gridHelper.visible;
+            }
+            break;
+    }
+}
+
+// ───────────────────────── Apply To All Parcels ─────────────────────────
+function applyToAllParcels() {
+    if (!selectedParcel) {
+        alert('Please select a parcel first to use as the template.');
+        return;
+    }
+
+    const templateParams = { ...selectedParcel.params };
+
+    const confirmed = confirm(
+        `Apply the current design parameters to all ${parcelFeatures.length} parcels?\n\n` +
+        `Typology: ${templateParams.typology}\n` +
+        `Usage: ${templateParams.usage}\n` +
+        `Floors: ${templateParams.floors}\n` +
+        `Floor Height: ${templateParams.floorHeight}m\n` +
+        `Setback: ${templateParams.setback}m\n\n` +
+        `This action cannot be undone.`
+    );
+
+    if (!confirmed) return;
+
+    btnApplyAll.disabled = true;
+    btnApplyAll.textContent = 'Applying...';
+
+    parcelFeatures.forEach(item => {
+        item.params.setback = templateParams.setback;
+        item.params.floors = templateParams.floors;
+        item.params.floorHeight = templateParams.floorHeight;
+        item.params.typology = templateParams.typology;
+        item.params.usage = templateParams.usage;
+        item.params.maxBcr = templateParams.maxBcr;
+        item.params.maxFar = templateParams.maxFar;
+        item.params.maxHeight = templateParams.maxHeight;
+
+        rebuildParcel3D(item);
+    });
+
+    // Refresh dashboard for selected
+    updateDashboard(selectedParcel);
+
+    btnApplyAll.disabled = false;
+    btnApplyAll.textContent = 'Apply to All Parcels';
+}

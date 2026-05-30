@@ -19,6 +19,7 @@
         <div class="spinner"></div>
         <h2>PlanX Urban Procedural 3D</h2>
         <p id="loading-text">Loading layer features from QGIS...</p>
+        <div class="version-badge">v0.3.0 — Procedural Engine</div>
     </div>
 
     <!-- 3D Canvas Viewport -->
@@ -68,6 +69,7 @@
                     <select id="input-usage">
                         <option value="Residential">Residential</option>
                         <option value="Commercial">Commercial</option>
+                        <option value="MixedUse">Mixed-Use (Retail + Residential)</option>
                         <option value="Civic">Civic / Institutional</option>
                         <option value="Park">Public Park</option>
                     </select>
@@ -167,7 +169,24 @@
                 <span id="metric-status" class="stat-val status-badge compliant">COMPLIANT</span>
             </div>
 
+            <hr class="divider">
+
+            <div class="dock-header"><h4>Population Estimator</h4></div>
+            <div class="stat-row">
+                <span>Est. Dwelling Units:</span>
+                <span id="metric-units" class="stat-val">-</span>
+            </div>
+            <div class="stat-row">
+                <span>Est. Population:</span>
+                <span id="metric-population" class="stat-val">-</span>
+            </div>
+            <div class="stat-row">
+                <span>Pop. Density:</span>
+                <span id="metric-density" class="stat-val">- pp/ha</span>
+            </div>
+
             <button id="btn-sync" class="sync-button">Sync Parameters to QGIS</button>
+            <button id="btn-apply-all" class="apply-all-button">Apply to All Parcels</button>
             <button id="btn-capture" class="capture-button">Download Viewport Capture</button>
         </div>
     </div>
@@ -177,6 +196,9 @@
         <div class="hud-chip">PlanX Urban Procedural 3D</div>
         <div class="hud-chip">Total Parcels: <span id="hud-total-parcels">0</span></div>
         <div class="hud-chip">CRS Projection: <span id="hud-crs">UTM</span></div>
+        <div class="hud-chip hud-shortcuts" title="R: Reset camera | F: Focus selected | N: Toggle night | G: Toggle grid">
+            ⌨ Shortcuts
+        </div>
     </div>
 
     <script type="module" src="app.js"></script>

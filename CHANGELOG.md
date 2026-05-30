@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.1.4] - 2026-05-30
+
+- Premium visual enhancements, day/night cycle, solar orbits, animated traffic, compliance linear gauges, and screenshot exporter
+
+## [0.1.4] - 2026-05-30
+
+- Premium visual enhancements, day/night cycle, solar orbits, animated traffic, compliance linear gauges, and screenshot exporter
+
+## [0.1.4] - 2026-05-30
+
+- Test
+
 ## [0.1.3] - 2026-05-30
 
 - Implement advanced typologies, solar orbit arc, sidewalk/courtyard trees, and night window glow
