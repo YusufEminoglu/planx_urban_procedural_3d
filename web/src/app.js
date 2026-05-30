@@ -1820,6 +1820,18 @@ function updateTraffic() {
     });
 }
 
+// Helper to traverse up the parent chain to find the associated parcel item
+function getParcelItemFromObject(obj) {
+    let current = obj;
+    while (current) {
+        if (current.userData && current.userData.parcelItem) {
+            return current.userData.parcelItem;
+        }
+        current = current.parent;
+    }
+    return null;
+}
+
 // Click listener to select building and open panel details
 function onDocumentClick(event) {
     if (event.target.closest('#control-dock') || event.target.closest('.hud-bar') || event.target.closest('.loading-screen')) return;
@@ -1839,8 +1851,10 @@ function onDocumentClick(event) {
 
     if (intersects.length > 0) {
         const hitObject = intersects[0].object;
-        const item = hitObject.userData.parcelItem;
-        selectParcel(item);
+        const item = getParcelItemFromObject(hitObject);
+        if (item) {
+            selectParcel(item);
+        }
     } else {
         deselectParcel();
     }
@@ -2575,20 +2589,24 @@ function onPointerMove(event) {
     const intersects = raycaster.intersectObjects(meshes);
 
     if (intersects.length > 0) {
-        document.body.style.cursor = 'pointer';
         const hitObject = intersects[0].object;
-        const item = hitObject.userData.parcelItem;
+        const item = getParcelItemFromObject(hitObject);
         
-        if (hoveredParcel !== item) {
-            // Un-highlight previous hover
-            if (hoveredParcel && hoveredParcel !== selectedParcel) {
-                setBuildingHoverHighlight(hoveredParcel.buildingMesh, false);
+        if (item) {
+            document.body.style.cursor = 'pointer';
+            if (hoveredParcel !== item) {
+                // Un-highlight previous hover
+                if (hoveredParcel && hoveredParcel !== selectedParcel) {
+                    setBuildingHoverHighlight(hoveredParcel.buildingMesh, false);
+                }
+                // Apply hover highlight
+                hoveredParcel = item;
+                if (hoveredParcel !== selectedParcel) {
+                    setBuildingHoverHighlight(hoveredParcel.buildingMesh, true);
+                }
             }
-            // Apply hover highlight
-            hoveredParcel = item;
-            if (hoveredParcel !== selectedParcel) {
-                setBuildingHoverHighlight(hoveredParcel.buildingMesh, true);
-            }
+        } else {
+            document.body.style.cursor = 'default';
         }
     } else {
         document.body.style.cursor = 'default';

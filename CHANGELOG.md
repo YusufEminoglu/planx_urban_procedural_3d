@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.3] - 2026-05-30
+
+- Fix TypeError on raycast hover by traversing up parent nodes to find parcelItem
+
 ## [0.2.2] - 2026-05-30
 
 - Add missing OutputShader.js required by OutputPass.js

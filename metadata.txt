@@ -3,7 +3,7 @@ name=PlanX Urban Procedural 3D
 qgisMinimumVersion=3.28
 qgisMaximumVersion=3.99
 description=Parametric 3D urban design and procedural planning toolbox with real-time compliance feedback.
-version=0.2.2
+version=0.2.3
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
