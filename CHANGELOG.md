@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.1.7] - 2026-05-30
+
+- Correct QgsJsonExporter to destination CRS (meters) and handle empty QGIS layers gracefully
+
 ## [0.1.6] - 2026-05-30
 
 - Fix QgsMessageLog logMessage level constant to Qgis.Warning

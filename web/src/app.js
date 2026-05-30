@@ -518,10 +518,22 @@ async function loadGeoJSON() {
 
 // Parse GeoJSON geometries and center coordinates
 function parseGeoJSON(data) {
-    if (!data.features || data.features.length === 0) return;
+    if (!data.features || data.features.length === 0) {
+        clearScene();
+        hudTotalParcels.textContent = "0";
+        if (placeholderEl) {
+            placeholderEl.innerHTML = "<strong>No features found in the active layer.</strong><br><br>Please draw polygon features (parcels/building blocks) in QGIS first, then click <strong>Reload Data from QGIS</strong>.";
+        }
+        return;
+    }
 
     // Clear existing scene elements and memory/resources
     clearScene();
+
+    // Reset default placeholder message
+    if (placeholderEl) {
+        placeholderEl.innerHTML = "Please click on a parcel in the 3D scene to start designing.";
+    }
 
     // Check if layer CRS is geographic
     const isGeographic = !!data.crs_is_geographic;

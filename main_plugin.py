@@ -105,6 +105,7 @@ class PlanXUrbanProcedural3D:
             # Enable coordinate precision and include ID
             exporter.setPrecision(6)
             exporter.setIncludeAttributes(True)
+            exporter.setDestinationCrs(layer.crs()) # Export in layer's own projected CRS (meters)
             
             features = list(layer.getFeatures())
             geojson_str = exporter.exportFeatures(features)
