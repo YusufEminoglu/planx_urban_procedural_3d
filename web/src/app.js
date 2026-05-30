@@ -8,6 +8,12 @@ let raycaster, mouse;
 let parcelFeatures = []; // Array of { fid, properties, outerRing, parcelMesh, buildingMesh, setbackMesh, sidewalkMesh, zoningMesh, area, params }
 let selectedParcel = null;
 
+// Traffic State
+let trafficCars = []; // Array of { carMesh, roadRing, speed, progress }
+
+// Light references
+let dirLight, ambientLight;
+
 // Projection variables (local offset)
 let centerX = 0;
 let centerY = 0;
@@ -17,6 +23,7 @@ const loadingEl = document.getElementById('loading');
 const placeholderEl = document.getElementById('selection-placeholder');
 const controlsEl = document.getElementById('editor-controls');
 const btnSync = document.getElementById('btn-sync');
+const btnCapture = document.getElementById('btn-capture');
 
 // Input controls
 const inTypology = document.getElementById('input-typology');
@@ -27,6 +34,7 @@ const inFloorHeight = document.getElementById('input-floorheight');
 const inMaxBcr = document.getElementById('input-max-bcr');
 const inMaxFar = document.getElementById('input-max-far');
 const inMaxHeight = document.getElementById('input-max-height');
+const inTime = document.getElementById('input-time');
 
 // Label values
 const lblSetback = document.getElementById('val-setback');
@@ -35,6 +43,7 @@ const lblFloorHeight = document.getElementById('val-floorheight');
 const lblMaxBcr = document.getElementById('val-max-bcr');
 const lblMaxFar = document.getElementById('val-max-far');
 const lblMaxHeight = document.getElementById('val-max-height');
+const lblTime = document.getElementById('val-time');
 
 // Metrics
 const metFid = document.getElementById('prop-fid');
@@ -46,6 +55,10 @@ const metBcrLabel = document.getElementById('metric-bcr-label');
 const metFarLabel = document.getElementById('metric-far-label');
 const metStatus = document.getElementById('metric-status');
 
+// Gauge elements
+const bcrFillEl = document.getElementById('gauge-bcr-fill');
+const farFillEl = document.getElementById('gauge-far-fill');
+
 // HUD
 const hudTotalParcels = document.getElementById('hud-total-parcels');
 const hudCrs = document.getElementById('hud-crs');
@@ -54,14 +67,14 @@ const hudCrs = document.getElementById('hud-crs');
 function init() {
     // 1. Scene setup
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0x0a0e17); // Slate-950 Dark Theme
+    scene.background = new THREE.Color(0x0a0e17);
 
     // 2. Camera setup
     camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 1, 10000);
     camera.position.set(0, 180, 280);
 
     // 3. Renderer setup
-    renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
@@ -71,13 +84,13 @@ function init() {
     controls = new OrbitControls(camera, renderer.domElement);
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
-    controls.maxPolarAngle = Math.PI / 2 - 0.02; // Prevents camera from going under ground
+    controls.maxPolarAngle = Math.PI / 2 - 0.02;
 
     // 5. Lighting
-    const ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+    ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
     scene.add(ambientLight);
 
-    const dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
     dirLight.position.set(200, 450, 150);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
@@ -114,7 +127,21 @@ function init() {
 // Render loop
 function animate() {
     requestAnimationFrame(animate);
+    
+    // Update controls
     controls.update();
+
+    // Update traffic cars positions
+    updateTraffic();
+
+    // Beacon light blinking animation
+    const timeSec = Date.now() * 0.005;
+    scene.traverse(child => {
+        if (child.userData && child.userData.isBeacon) {
+            child.material.opacity = 0.2 + Math.abs(Math.sin(timeSec * 2)) * 0.8;
+        }
+    });
+
     renderer.render(scene, camera);
 }
 
@@ -155,6 +182,15 @@ function setupInputListeners() {
         updateDashboard(selectedParcel);
     };
 
+    const triggerTimeUpdate = () => {
+        const tVal = parseFloat(inTime.value);
+        const hours = Math.floor(tVal);
+        const mins = (tVal % 1) === 0 ? "00" : "30";
+        lblTime.textContent = `${hours}:${mins}`;
+
+        updateSolarPhysics(tVal);
+    };
+
     inSetback.addEventListener('input', triggerUpdate);
     inFloors.addEventListener('input', triggerUpdate);
     inFloorHeight.addEventListener('input', triggerUpdate);
@@ -166,7 +202,76 @@ function setupInputListeners() {
     inMaxFar.addEventListener('input', triggerUpdate);
     inMaxHeight.addEventListener('input', triggerUpdate);
 
+    // Time-of-day slider
+    inTime.addEventListener('input', triggerTimeUpdate);
+
     btnSync.addEventListener('click', syncToQGIS);
+    btnCapture.addEventListener('click', captureViewport);
+}
+
+// Update lights and sky theme based on solar time of day
+function updateSolarPhysics(timeVal) {
+    // Math model of sun orbit path
+    const angle = ((timeVal - 6) / 16) * Math.PI; // map 6:00-22:00 to 0-180 degrees
+    const isNight = timeVal < 7.5 || timeVal > 19.5;
+
+    // Dome Orbit position
+    const radius = 500;
+    dirLight.position.x = Math.cos(angle + Math.PI) * radius;
+    dirLight.position.y = Math.sin(angle) * radius;
+    dirLight.position.z = 100;
+
+    if (isNight) {
+        // Switch to Dark Midnight Scene background
+        scene.background.setHex(0x02040a);
+        ambientLight.color.setHex(0x1e1b4b); // Dim indigo light
+        ambientLight.intensity = 0.25;
+        dirLight.intensity = 0.05; // Dim moon-like sun
+    } else {
+        // Daylight Mode
+        scene.background.setHex(0x0a0e17);
+        ambientLight.color.setHex(0xffffff);
+        ambientLight.intensity = 0.45;
+        
+        // Solar intensity peaks at noon
+        const peakFactor = Math.sin(angle);
+        dirLight.intensity = 0.35 + peakFactor * 0.55;
+    }
+
+    // Update active building emission light and streetlights visibility
+    parcelFeatures.forEach(item => {
+        // Toggle building window glow at night
+        if (item.buildingMesh) {
+            const wallMaterial = item.buildingMesh.material[1];
+            if (wallMaterial && wallMaterial.map) {
+                if (isNight) {
+                    wallMaterial.emissive.setHex(0x8c732b); // Glow yellow
+                    wallMaterial.emissiveIntensity = 1.0;
+                } else {
+                    wallMaterial.emissive.setHex(0x000000); // Black/off
+                    wallMaterial.emissiveIntensity = 0.0;
+                }
+            }
+        }
+
+        // Toggle streetlight bulb visibility
+        if (item.sidewalkMesh) {
+            item.sidewalkMesh.traverse(child => {
+                if (child.userData && child.userData.isStreetlightBulb) {
+                    child.visible = isNight;
+                }
+            });
+        }
+    });
+
+    // Toggle headlights on traffic cars
+    trafficCars.forEach(car => {
+        car.carMesh.traverse(child => {
+            if (child.userData && (child.userData.isHeadlight || child.userData.isTaillight)) {
+                child.visible = isNight;
+            }
+        });
+    });
 }
 
 // Fetch exported layer GeoJSON from local Python server
@@ -271,6 +376,9 @@ function parseGeoJSON(data) {
         parcelFeatures.push(item);
     });
 
+    // Generate Animated Traffic on road tracks
+    generateTrafficCars();
+
     // Zoom camera to fit parcels bounds
     const maxDim = Math.max(maxX - minX, maxY - minY);
     camera.position.set(0, maxDim * 0.8, maxDim * 1.2);
@@ -290,7 +398,7 @@ function buildParcelGround(item) {
     geom.rotateX(-Math.PI / 2);
 
     const mat = new THREE.MeshStandardMaterial({
-        color: 0x1e293b, // slate-800
+        color: 0x1e293b,
         roughness: 0.9,
         polygonOffset: true,
         polygonOffsetFactor: 1,
@@ -313,7 +421,7 @@ function buildParcelGround(item) {
     scene.add(line);
 }
 
-// Build concrete sidewalk mesh around the parcel
+// Build concrete sidewalk and place procedural streetlights along curbs
 function buildSidewalk(item) {
     if (item.sidewalkMesh) {
         scene.remove(item.sidewalkMesh);
@@ -343,7 +451,7 @@ function buildSidewalk(item) {
     geom.rotateX(-Math.PI / 2);
 
     const mat = new THREE.MeshStandardMaterial({
-        color: 0x52525b, // slate-600 concrete
+        color: 0x52525b, // concrete grey
         roughness: 0.8
     });
 
@@ -352,6 +460,57 @@ function buildSidewalk(item) {
     mesh.position.y = -0.05;
     scene.add(mesh);
     item.sidewalkMesh = mesh;
+
+    // Place Procedural Streetlights along curb corners
+    const numLights = Math.max(2, Math.floor(item.outerRing.length / 2));
+    const step = Math.floor(item.outerRing.length / numLights);
+
+    for (let i = 0; i < numLights; i++) {
+        const idx = (i * step) % item.outerRing.length;
+        const pt = item.outerRing[idx];
+        
+        // Offset light slightly outwards onto sidewalk
+        const ptNext = item.outerRing[(idx + 1) % item.outerRing.length];
+        const dx = ptNext.x - pt.x;
+        const dy = ptNext.y - pt.y;
+        const len = Math.sqrt(dx*dx + dy*dy);
+        if (len < 0.01) continue;
+        const nx = -dy / len;
+        const ny = dx / len;
+
+        const lx = pt.x + nx * 1.0;
+        const lz = - (pt.y + ny * 1.0);
+
+        // Build streetlight pole
+        const poleGeom = new THREE.CylinderGeometry(0.1, 0.15, 6, 8);
+        const poleMat = new THREE.MeshStandardMaterial({ color: 0x3f3f46, metalness: 0.8 });
+        const pole = new THREE.Mesh(poleGeom, poleMat);
+        pole.position.set(lx, 3, lz);
+        pole.castShadow = true;
+        mesh.add(pole);
+
+        // Lamp head Arm
+        const armGeom = new THREE.BoxGeometry(0.2, 0.2, 1.5);
+        const arm = new THREE.Mesh(armGeom, poleMat);
+        arm.position.set(0, 3, 0.5);
+        pole.add(arm);
+
+        // Glowing light bulb (only visible at night)
+        const bulbGeom = new THREE.SphereGeometry(0.3, 16, 16);
+        const bulbMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+        const bulb = new THREE.Mesh(bulbGeom, bulbMat);
+        bulb.position.set(0, 2.8, 1.2);
+        bulb.userData = { isStreetlightBulb: true };
+        bulb.visible = false; // off by default (daylight)
+        pole.add(bulb);
+
+        // Spot light source casting downward
+        const spotLight = new THREE.SpotLight(0xfef08a, 4, 15, Math.PI / 4, 0.5, 1);
+        spotLight.position.set(0, 2.7, 1.2);
+        spotLight.target.position.set(0, 0, 1.2);
+        bulb.add(spotLight);
+        bulb.add(spotLight.target);
+    }
 }
 
 // Rebuild building massing, zoning envelopes, and setback lines based on params
@@ -428,17 +587,17 @@ function rebuildParcel3D(item) {
     const farViolation = far > item.params.maxFar;
     const hasViolation = heightViolation || bcrViolation || farViolation;
 
-    // 3. Build Zoning Envelope (Modelur Style)
+    // 3. Build Zoning Envelope
     buildZoningEnvelope(item, insetRing, item.params.maxHeight, hasViolation);
 
     // 4. Build Building Massing
+    let bldGeom;
     const bldShape = new THREE.Shape();
     insetRing.forEach((pt, i) => {
         if (i === 0) bldShape.moveTo(pt.x, pt.y);
         else bldShape.lineTo(pt.x, pt.y);
     });
 
-    let bldGeom;
     if (typology === 'Courtyard') {
         const innerSetback = 8;
         const innerRing = offsetPolygonRing(insetRing, innerSetback);
@@ -471,8 +630,12 @@ function rebuildParcel3D(item) {
     scene.add(bldMesh);
     item.buildingMesh = bldMesh;
 
-    // Add Rooftop Details (penthouses, HVAC, solar panels)
-    addRooftopDetails(bldMesh, insetRing, height, usage);
+    // Add Rooftop Details (Hipped slanted roof for Residential, flat with Helipad for Commercial)
+    if (usage === 'Residential' && (typology === 'Tower' || typology === 'Slab')) {
+        buildPitchedRoof(bldMesh, insetRing, height);
+    } else {
+        addRooftopDetails(bldMesh, insetRing, height, usage);
+    }
 }
 
 // Generate textured building materials with window grids dynamically
@@ -487,13 +650,18 @@ function getBuildingMaterials(usage, floors) {
     }
 
     const wallTex = createFacadeTexture(colorHex, usage);
-    // scale texture repetition to match height/floors
     wallTex.repeat.set(6, floors);
+
+    // Get current solar state to toggle window emission immediately on creation
+    const tVal = parseFloat(inTime.value);
+    const isNight = tVal < 7.5 || tVal > 19.5;
 
     const wallMat = new THREE.MeshStandardMaterial({
         map: wallTex,
         roughness: 0.3,
-        metalness: 0.1
+        metalness: 0.1,
+        emissive: new THREE.Color(isNight ? 0x8c732b : 0x000000),
+        emissiveIntensity: isNight ? 1.0 : 0.0
     });
 
     const roofMat = new THREE.MeshStandardMaterial({
@@ -501,7 +669,6 @@ function getBuildingMaterials(usage, floors) {
         roughness: 0.8
     });
 
-    // In Three.js ExtrudeGeometry, index 0 is for caps, index 1 is for sides (walls)
     return [roofMat, wallMat];
 }
 
@@ -530,7 +697,6 @@ function createFacadeTexture(wallColor, usage) {
     const gapY = (256 - rows * h) / (rows + 1);
 
     for (let r = 0; r < rows; r++) {
-        // Ground floor gets storefronts/doors
         const isGround = (r === rows - 1);
         
         for (let c = 0; c < cols; c++) {
@@ -541,7 +707,6 @@ function createFacadeTexture(wallColor, usage) {
                 // Entrance door
                 ctx.fillStyle = '#1e293b';
                 ctx.fillRect(x, y, w, h + gapY);
-                // Glass panel inside door
                 ctx.fillStyle = '#93c5fd';
                 ctx.fillRect(x + 4, y + 4, w - 8, h / 2);
                 ctx.fillStyle = isCommercial ? '#93c5fd' : '#fef08a';
@@ -566,9 +731,49 @@ function createFacadeTexture(wallColor, usage) {
     return texture;
 }
 
-// Rooftop elements (HVAC units, elevator penthouses, solar panels)
+// Slanted/Hipped pitched roof generator for Residential typologies
+function buildPitchedRoof(parentMesh, insetRing, height) {
+    // 1. Calculate top vertices of building
+    const topVerts = insetRing.map(pt => new THREE.Vector3(pt.x, height, -pt.y));
+    const N = topVerts.length;
+
+    // 2. Calculate top centroid
+    let cx = 0, cz = 0;
+    topVerts.forEach(v => { cx += v.x; cz += v.z; });
+    cx /= N;
+    cz /= N;
+    const topCentroid = new THREE.Vector3(cx, height + 4.0, cz); // Ridge elevated by 4.0m
+
+    // 3. Build geometry faces using BufferGeometry
+    const vertices = [];
+    for (let i = 0; i < N; i++) {
+        const v1 = topVerts[i];
+        const v2 = topVerts[(i + 1) % N];
+
+        // Push triangle: v1, v2, topCentroid
+        vertices.push(v1.x, v1.y, v1.z);
+        vertices.push(v2.x, v2.y, v2.z);
+        vertices.push(topCentroid.x, topCentroid.y, topCentroid.z);
+    }
+
+    const geom = new THREE.BufferGeometry();
+    geom.setAttribute('position', new THREE.Float32BufferAttribute(vertices, 3));
+    geom.computeVertexNormals();
+
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x991b1b, // red clay tiles
+        roughness: 0.7,
+        side: THREE.DoubleSide
+    });
+
+    const mesh = new THREE.Mesh(geom, mat);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    parentMesh.add(mesh);
+}
+
+// Flat roof details (helipad, HVAC boxes, beacon lights)
 function addRooftopDetails(parentMesh, insetRing, height, usage) {
-    // Calculate centroid of the footprint
     let cx = 0, cy = 0;
     insetRing.forEach(pt => { cx += pt.x; cy += pt.y; });
     cx /= insetRing.length;
@@ -578,29 +783,74 @@ function addRooftopDetails(parentMesh, insetRing, height, usage) {
     const pentGeom = new THREE.BoxGeometry(6, 3, 6);
     const pentMat = new THREE.MeshStandardMaterial({ color: 0x475569 });
     const penthouse = new THREE.Mesh(pentGeom, pentMat);
-    // position at centroid
     penthouse.position.set(cx, height + 1.5, -cy);
     penthouse.castShadow = true;
     parentMesh.add(penthouse);
+
+    // Beacon warning light on penthouse top (blinking red warning beacon)
+    const beaconGeom = new THREE.SphereGeometry(0.3, 8, 8);
+    const beaconMat = new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true });
+    const beacon = new THREE.Mesh(beaconGeom, beaconMat);
+    beacon.position.set(0, 1.7, 0);
+    beacon.userData = { isBeacon: true };
+    penthouse.add(beacon);
+
+    // Glowing pointlight
+    const beaconLight = new THREE.PointLight(0xef4444, 2, 20);
+    beacon.add(beaconLight);
 
     // HVAC boxes
     const hvacGeom = new THREE.BoxGeometry(2, 1.2, 2);
     const hvacMat = new THREE.MeshStandardMaterial({ color: 0x94a3b8, metalness: 0.9, roughness: 0.2 });
     for (let i = 0; i < 2; i++) {
         const hvac = new THREE.Mesh(hvacGeom, hvacMat);
-        hvac.position.set(cx - 5 + i * 10, height + 0.6, -cy + 5);
+        hvac.position.set(cx - 6 + i * 12, height + 0.6, -cy + 6);
         hvac.castShadow = true;
         parentMesh.add(hvac);
     }
 
-    // Solar panels
-    if (usage !== 'Residential') {
+    // Commercial Helipad painting
+    if (usage === 'Commercial') {
+        const padGeom = new THREE.CylinderGeometry(5, 5, 0.1, 32);
+        
+        // Draw Helipad letter canvas texture
+        const padCanvas = document.createElement('canvas');
+        padCanvas.width = 128;
+        padCanvas.height = 128;
+        const padCtx = padCanvas.getContext('2d');
+        padCtx.fillStyle = '#4b5563'; // concrete pad
+        padCtx.fillRect(0, 0, 128, 128);
+        
+        // Draw white circle
+        padCtx.strokeStyle = '#ffffff';
+        padCtx.lineWidth = 6;
+        padCtx.beginPath();
+        padCtx.arc(64, 64, 40, 0, Math.PI * 2);
+        padCtx.stroke();
+        
+        // Draw H letter
+        padCtx.fillStyle = '#ffffff';
+        padCtx.font = 'bold 50px Arial';
+        padCtx.textAlign = 'center';
+        padCtx.textBaseline = 'middle';
+        padCtx.fillText('H', 64, 64);
+        
+        const padTex = new THREE.CanvasTexture(padCanvas);
+        const padMat = new THREE.MeshStandardMaterial({ map: padTex, roughness: 0.7 });
+        const pad = new THREE.Mesh(padGeom, padMat);
+        pad.position.set(cx, height + 0.05, -cy - 5);
+        pad.receiveShadow = true;
+        parentMesh.add(pad);
+    }
+
+    // Solar panels for Civic/Institutional
+    if (usage === 'Civic') {
         const panelGeom = new THREE.BoxGeometry(3, 0.1, 1.6);
         const panelMat = new THREE.MeshStandardMaterial({ color: 0x1d4ed8, roughness: 0.1 });
         for (let i = -1; i <= 1; i++) {
             const panel = new THREE.Mesh(panelGeom, panelMat);
-            panel.rotation.x = -Math.PI / 6; // Angle tilt
-            panel.position.set(cx + i * 4, height + 0.5, -cy - 5);
+            panel.rotation.x = -Math.PI / 6;
+            panel.position.set(cx + i * 5, height + 0.5, -cy - 6);
             panel.castShadow = true;
             parentMesh.add(panel);
         }
@@ -619,21 +869,19 @@ function buildZoningEnvelope(item, insetRing, maxHeight, isViolated) {
     envGeom.rotateX(-Math.PI / 2);
     envGeom.translate(0, maxHeight, 0);
 
-    const envColor = isViolated ? 0xef4444 : 0x10b981; // neon red if violation, neon green if compliant
+    const envColor = isViolated ? 0xef4444 : 0x10b981;
     const envMat = new THREE.MeshStandardMaterial({
         color: envColor,
         transparent: true,
         opacity: isViolated ? 0.25 : 0.08,
         side: THREE.DoubleSide,
-        depthWrite: false,
-        wireframe: false
+        depthWrite: false
     });
 
     const envMesh = new THREE.Mesh(envGeom, envMat);
     scene.add(envMesh);
     item.zoningMesh = envMesh;
 
-    // Structural outline edges
     const edges = new THREE.EdgesGeometry(envGeom);
     const lineMat = new THREE.LineBasicMaterial({
         color: envColor,
@@ -654,6 +902,100 @@ function drawSetbackErrorLine(item) {
     const errorLine = new THREE.Line(errorGeom, errorMat);
     scene.add(errorLine);
     item.setbackMesh = errorLine;
+}
+
+// Generate animated low-poly traffic cars driving around parcel block perimeters
+function generateTrafficCars() {
+    // Clear old traffic cars
+    trafficCars.forEach(car => {
+        scene.remove(car.carMesh);
+    });
+    trafficCars = [];
+
+    // Find suitable loop tracks: sidewalk boundaries expanded by 3.5m are roads!
+    parcelFeatures.forEach(item => {
+        const roadRing = offsetPolygonRing(item.outerRing, -4.5);
+        if (!roadRing) return;
+
+        // Spawn 2 cars per parcel block
+        const colors = [0xef4444, 0x3b82f6, 0xf59e0b, 0x10b981];
+        
+        for (let i = 0; i < 2; i++) {
+            const carGeom = new THREE.BoxGeometry(3.5, 1.4, 1.8);
+            const carColor = colors[Math.floor(Math.random() * colors.length)];
+            const carMat = new THREE.MeshStandardMaterial({ color: carColor, roughness: 0.5 });
+            const carMesh = new THREE.Mesh(carGeom, carMat);
+            carMesh.castShadow = true;
+
+            // Simple cabin top
+            const cabinGeom = new THREE.BoxGeometry(2, 0.8, 1.6);
+            const cabinMat = new THREE.MeshStandardMaterial({ color: 0x18181b });
+            const cabin = new THREE.Mesh(cabinGeom, cabinMat);
+            cabin.position.set(-0.3, 1.0, 0);
+            carMesh.add(cabin);
+
+            // Front headlights (glowing spheres)
+            const headlightGeom = new THREE.SphereGeometry(0.2, 8, 8);
+            const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+            for (let s = -1; s <= 1; s += 2) {
+                const headlight = new THREE.Mesh(headlightGeom, headlightMat);
+                headlight.position.set(1.76, -0.2, s * 0.6);
+                headlight.userData = { isHeadlight: true };
+                headlight.visible = false; // off by default (daylight)
+                carMesh.add(headlight);
+            }
+
+            // Rear brake taillights (red spheres)
+            const taillightMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+            for (let s = -1; s <= 1; s += 2) {
+                const taillight = new THREE.Mesh(headlightGeom, taillightMat);
+                taillight.position.set(-1.76, -0.2, s * 0.6);
+                taillight.userData = { isTaillight: true };
+                taillight.visible = false;
+                carMesh.add(taillight);
+            }
+
+            scene.add(carMesh);
+
+            trafficCars.push({
+                carMesh: carMesh,
+                roadRing: roadRing,
+                speed: 0.05 + Math.random() * 0.05,
+                progress: Math.random() * roadRing.length
+            });
+        }
+    });
+
+    // Make sure headlights match current slider value immediately
+    updateSolarPhysics(parseFloat(inTime.value));
+}
+
+// Drive cars along their respective road loop loops
+function updateTraffic() {
+    trafficCars.forEach(car => {
+        const ring = car.roadRing;
+        car.progress += car.speed;
+        
+        // Find segment indices based on progress
+        const idx1 = Math.floor(car.progress) % ring.length;
+        const idx2 = (idx1 + 1) % ring.length;
+        const segmentProgress = car.progress % 1.0;
+
+        const pt1 = ring[idx1];
+        const pt2 = ring[idx2];
+
+        // Interpolate position
+        const x = pt1.x + (pt2.x - pt1.x) * segmentProgress;
+        const z = - (pt1.y + (pt2.y - pt1.y) * segmentProgress);
+
+        car.carMesh.position.set(x, 0.65, z); // lift off ground
+
+        // Calculate heading rotation
+        const dx = pt2.x - pt1.x;
+        const dy = pt2.y - pt1.y;
+        const heading = Math.atan2(-dy, dx);
+        car.carMesh.rotation.y = heading;
+    });
 }
 
 // Click listener to select building and open panel details
@@ -719,7 +1061,6 @@ function selectParcel(item) {
     metFid.textContent = item.fid;
     metArea.textContent = Math.round(item.area).toLocaleString() + " m²";
 
-    // Show controls
     placeholderEl.classList.add('hidden');
     controlsEl.classList.remove('hidden');
 
@@ -772,23 +1113,50 @@ function updateDashboard(item) {
     metGfa.textContent = Math.round(gfa).toLocaleString() + " m²";
     metHeight.textContent = height.toFixed(1) + " m";
     
-    // Actual vs Limit
+    // Actual vs Limit Text Labels
     metBcrLabel.textContent = `${bcr.toFixed(2)} / ${item.params.maxBcr.toFixed(2)}`;
     metFarLabel.textContent = `${far.toFixed(2)} / ${item.params.maxFar.toFixed(2)}`;
 
-    // Set colors of BCR/FAR labels based on violations
-    metBcrLabel.style.color = bcr > item.params.maxBcr ? "#ef4444" : "#10b981";
-    metFarLabel.style.color = far > item.params.maxFar ? "#ef4444" : "#10b981";
-    metHeight.style.color = height > item.params.maxHeight ? "#ef4444" : "#10b981";
+    // Update Visual Gauge Bars widths
+    const bcrPercent = Math.min(100, (bcr / item.params.maxBcr) * 100);
+    const farPercent = Math.min(100, (far / item.params.maxFar) * 100);
 
-    // Violation Check
-    const heightViolated = height > item.params.maxHeight;
+    bcrFillEl.style.width = `${bcrPercent}%`;
+    farFillEl.style.width = `${farPercent}%`;
+
+    // Colors of progress bars based on violations
     const bcrViolated = bcr > item.params.maxBcr;
+    bcrFillEl.className = `gauge-bar-fill ${bcrViolated ? "red-bar" : "green-bar"}`;
+    metBcrLabel.style.color = bcrViolated ? "#ef4444" : "#10b981";
+
     const farViolated = far > item.params.maxFar;
+    farFillEl.className = `gauge-bar-fill ${farViolated ? "red-bar" : "green-bar"}`;
+    metFarLabel.style.color = farViolated ? "#ef4444" : "#10b981";
+
+    const heightViolated = height > item.params.maxHeight;
+    metHeight.style.color = heightViolated ? "#ef4444" : "#10b981";
+
     const violated = heightViolated || bcrViolated || farViolated || footprintArea === 0;
     
     metStatus.textContent = violated ? "VIOLATION" : "COMPLIANT";
     metStatus.className = "stat-val status-badge " + (violated ? "violation" : "compliant");
+}
+
+// Capture current 3D WebGL viewport canvas as a PNG screenshot download
+function captureViewport() {
+    try {
+        // Redraw scene
+        renderer.render(scene, camera);
+        const dataURL = renderer.domElement.toDataURL('image/png');
+        
+        const link = document.createElement('a');
+        link.download = 'planx_urban_design_capture.png';
+        link.href = dataURL;
+        link.click();
+    } catch (e) {
+        console.error(e);
+        alert("Failed to capture viewport screenshot.");
+    }
 }
 
 // POST modifications back to the local Python QGIS server
@@ -820,7 +1188,6 @@ async function syncToQGIS() {
                 floor_h: selectedParcel.params.floorHeight,
                 typology: selectedParcel.params.typology,
                 usage: selectedParcel.params.usage,
-                // Sync zoning limits too
                 max_bcr: selectedParcel.params.maxBcr,
                 max_far: selectedParcel.params.maxFar,
                 max_height: selectedParcel.params.maxHeight,
@@ -913,7 +1280,6 @@ function offsetPolygonRing(ring, distance) {
         const pt = intersectLines(s1.p1, s1.dir, s2.p1, s2.dir);
         if (pt) {
             const d1 = distToSegment(pt, ring[(i - 1 + M) % M], ring[i]);
-            // Increase buffer if distance is negative (outward offset)
             const checkDist = Math.abs(distance);
             if (d1 > checkDist * 4) return null; // self-intersection/degenerate
             insetRing.push(pt);
@@ -925,7 +1291,7 @@ function offsetPolygonRing(ring, distance) {
     return insetRing;
 }
 
-// Find intersection point of two infinite 2D lines (Point + Direction vector)
+// Find intersection point of two infinite 2D lines
 function intersectLines(p1, d1, p2, d2) {
     const denom = d1.x * d2.y - d1.y * d2.x;
     if (Math.abs(denom) < 0.0001) return null;

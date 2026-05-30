@@ -1,6 +1,6 @@
 # PlanX Urban Procedural 3D
 
-PlanX Urban Procedural 3D is a lightweight, fast, parametric urban design and procedural planning toolbox for QGIS 3 & 4 with Modelur-style feedback loops. 
+PlanX Urban Procedural 3D is a lightweight, fast, parametric urban design and procedural planning toolbox for QGIS 3 & 4 with real-time compliance feedback loops. 
 
 It enables urban planners to select vector parcel/block polygons, run a local Python HTTP server directly from QGIS, and open an interactive 3D Web UI cockpit (Three.js) to dynamically adjust parameters (setbacks, height/floors, building typology, and usage) while viewing real-time compliance metrics (FAR, BCR, and GFA) on a live dashboard.
 

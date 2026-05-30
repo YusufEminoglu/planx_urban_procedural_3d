@@ -181,7 +181,7 @@ class PluginDialog(QDialog):
         
         desc = QLabel(
             "<h3>PlanX Urban Procedural 3D</h3>"
-            "<p style='color: #94a3b8;'>Parametric 3D urban design and procedural planning toolbox with Modelur-style feedback loops.</p>"
+            "<p style='color: #94a3b8;'>Parametric 3D urban design and procedural planning toolbox with real-time compliance feedback loops.</p>"
             "<p style='color: #94a3b8;'>Developed for education and classroom workflows at Dokuz Eylul University, Department of City and Regional Planning.</p>"
             "<p style='color: #e2e8f0;'>Report issues: "
             "<a href='https://github.com/YusufEminoglu/planx_urban_procedural_3d/issues' style='color: #38bdf8;'>GitHub Issues</a></p>"
