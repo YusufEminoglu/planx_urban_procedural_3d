@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.2.6] - 2026-05-30
+
+- Re-bump cache-buster tags in index.html to v0.2.6
+
 ## [0.2.5] - 2026-05-30
 
 - Implement batch sync payload matching for QGIS and move field creation before startEditing()
