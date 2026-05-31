@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.3.1] - 2026-05-31
+
+- Implement interactive 3D height-dragging handles for building models in viewport
+- Disable OrbitControls automatically during active drag operations
+- Adjust browser cursor to ns-resize when hovering over 3D height handle
+
 ## [0.3.0] - 2026-05-31
 
 - Fix clockwise polygon winding road offsets and slow down simulation speeds

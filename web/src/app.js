@@ -22,6 +22,13 @@ let trafficCars = []; // Array of { carMesh, roadRing, speed, progress }
 let isTimeAnimating = false;
 let timeAnimationId = null;
 
+// Height Dragging State
+let heightHandleMesh = null;
+let isDraggingHeight = false;
+let dragStartHeight = 0;
+let dragStartFloors = 0;
+let dragIntersectionPlane = null;
+
 // Light references
 let dirLight, ambientLight;
 
@@ -289,7 +296,9 @@ function init() {
     raycaster = new THREE.Raycaster();
     mouse = new THREE.Vector2();
     window.addEventListener('click', onDocumentClick);
+    window.addEventListener('pointerdown', onPointerDown);
     window.addEventListener('pointermove', onPointerMove);
+    window.addEventListener('pointerup', onPointerUp);
     window.addEventListener('resize', onWindowResize);
 
     setupInputListeners();
@@ -363,6 +372,23 @@ function setupInputListeners() {
         // Rebuild meshes
         rebuildParcel3D(selectedParcel);
         updateDashboard(selectedParcel);
+
+        // Update height handle position or remove it if park
+        if (selectedParcel.params.usage !== 'Park') {
+            if (heightHandleMesh) {
+                updateHeightHandle();
+            } else {
+                let cx = 0, cy = 0;
+                const ring = selectedParcel.outerRing;
+                ring.forEach(pt => { cx += pt.x; cy += pt.y; });
+                cx /= ring.length;
+                cy /= ring.length;
+                const height = selectedParcel.params.floors * selectedParcel.params.floorHeight;
+                spawnHeightHandle(cx, cy, height);
+            }
+        } else {
+            removeHeightHandle();
+        }
     };
 
     const triggerTimeUpdate = () => {
@@ -2041,6 +2067,11 @@ function onDocumentClick(event) {
 
     raycaster.setFromCamera(mouse, camera);
 
+    if (heightHandleMesh) {
+        const handleIntersects = raycaster.intersectObject(heightHandleMesh, true);
+        if (handleIntersects.length > 0) return;
+    }
+
     const meshes = [];
     parcelFeatures.forEach(item => {
         if (item.parcelMesh) meshes.push(item.parcelMesh);
@@ -2097,6 +2128,20 @@ function selectParcel(item) {
     controlsEl.classList.remove('hidden');
 
     updateDashboard(item);
+
+    // Spawn 3D arrow height handle on top of building
+    if (item.params.usage !== 'Park') {
+        let cx = 0, cy = 0;
+        const ring = item.outerRing;
+        ring.forEach(pt => { cx += pt.x; cy += pt.y; });
+        cx /= ring.length;
+        cy /= ring.length;
+
+        const height = item.params.floors * item.params.floorHeight;
+        spawnHeightHandle(cx, cy, height);
+    } else {
+        removeHeightHandle();
+    }
 }
 
 // Deselect selected parcel and hide controls panel
@@ -2105,6 +2150,7 @@ function deselectParcel() {
         setBuildingHighlight(selectedParcel.buildingMesh, false);
     }
     selectedParcel = null;
+    removeHeightHandle();
 
     placeholderEl.classList.remove('hidden');
     controlsEl.classList.add('hidden');
@@ -2851,6 +2897,44 @@ function onPointerMove(event) {
 
     raycaster.setFromCamera(mouse, camera);
 
+    // 1. If actively dragging the height handle
+    if (isDraggingHeight && selectedParcel && heightHandleMesh) {
+        const intersectPoint = new THREE.Vector3();
+        raycaster.ray.intersectPlane(dragIntersectionPlane, intersectPoint);
+
+        const deltaY = intersectPoint.y - dragStartHeight;
+        const floorH = selectedParcel.params.floorHeight;
+        const deltaFloors = Math.round(deltaY / floorH);
+        
+        const newFloors = Math.max(1, Math.min(30, dragStartFloors + deltaFloors));
+        if (newFloors !== selectedParcel.params.floors) {
+            inFloors.value = newFloors;
+            lblFloors.textContent = newFloors;
+            selectedParcel.params.floors = newFloors;
+            selectedParcel.modified = true;
+            
+            rebuildParcel3D(selectedParcel);
+            updateDashboard(selectedParcel);
+            updateHeightHandle();
+        }
+        document.body.style.cursor = 'ns-resize';
+        return;
+    }
+
+    // 2. If hovering over the height handle
+    if (heightHandleMesh) {
+        const handleIntersects = raycaster.intersectObject(heightHandleMesh, true);
+        if (handleIntersects.length > 0) {
+            document.body.style.cursor = 'ns-resize';
+            if (hoveredParcel && hoveredParcel !== selectedParcel) {
+                setBuildingHoverHighlight(hoveredParcel.buildingMesh, false);
+                hoveredParcel = null;
+            }
+            return;
+        }
+    }
+
+    // 3. Fallback: Hovering over standard parcels / buildings
     const meshes = [];
     parcelFeatures.forEach(item => {
         if (item.parcelMesh) meshes.push(item.parcelMesh);
@@ -2945,4 +3029,111 @@ function animateTime() {
     updateSolarPhysics(tVal);
 
     timeAnimationId = requestAnimationFrame(animateTime);
+}
+
+// Spawn 3D vertical arrow drag handle on top of the selected building
+function spawnHeightHandle(cx, cy, height) {
+    removeHeightHandle();
+
+    // Create an arrow shape pointing up (Teal cylinder + cone)
+    const handleGroup = new THREE.Group();
+
+    // Cylinder shaft
+    const shaftGeom = new THREE.CylinderGeometry(0.18, 0.22, 2.2, 8);
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x0ea5e9, // bright light-blue/teal
+        roughness: 0.3,
+        metalness: 0.8,
+        emissive: 0x0284c7,
+        emissiveIntensity: 0.3
+    });
+    const shaft = new THREE.Mesh(shaftGeom, mat);
+    shaft.position.y = 1.1;
+    shaft.castShadow = true;
+    handleGroup.add(shaft);
+
+    // Cone tip
+    const coneGeom = new THREE.ConeGeometry(0.45, 1.0, 8);
+    const cone = new THREE.Mesh(coneGeom, mat);
+    cone.position.y = 2.7;
+    cone.castShadow = true;
+    handleGroup.add(cone);
+
+    handleGroup.position.set(cx, height + 0.5, -cy);
+    handleGroup.userData = { isHeightHandle: true };
+
+    scene.add(handleGroup);
+    heightHandleMesh = handleGroup;
+}
+
+// Update height handle position matching building top
+function updateHeightHandle() {
+    if (!selectedParcel || !heightHandleMesh) return;
+    
+    // Calculate center of selected parcel
+    let cx = 0, cy = 0;
+    const ring = selectedParcel.outerRing;
+    ring.forEach(pt => { cx += pt.x; cy += pt.y; });
+    cx /= ring.length;
+    cy /= ring.length;
+
+    const floors = selectedParcel.params.floors;
+    const floorH = selectedParcel.params.floorHeight;
+    const height = floors * floorH;
+
+    heightHandleMesh.position.set(cx, height + 0.5, -cy);
+}
+
+// Remove height handle and clean WebGL resources
+function removeHeightHandle() {
+    if (heightHandleMesh) {
+        scene.remove(heightHandleMesh);
+        heightHandleMesh.traverse(child => {
+            if (child.isMesh) {
+                child.geometry.dispose();
+                child.material.dispose();
+            }
+        });
+        heightHandleMesh = null;
+    }
+}
+
+// Pointer down event handler to detect starting of height dragging
+function onPointerDown(event) {
+    if (event.target.closest('#control-dock') || event.target.closest('.hud-bar') || event.target.closest('.loading-screen')) return;
+
+    mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
+    mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
+
+    raycaster.setFromCamera(mouse, camera);
+
+    if (heightHandleMesh) {
+        const handleIntersects = raycaster.intersectObject(heightHandleMesh, true);
+        if (handleIntersects.length > 0) {
+            isDraggingHeight = true;
+            controls.enabled = false; // Disable camera rotation
+
+            // Create a virtual vertical plane facing the camera, aligned with handle
+            const normal = new THREE.Vector3();
+            camera.getWorldDirection(normal);
+            normal.y = 0;
+            normal.normalize();
+            
+            dragIntersectionPlane = new THREE.Plane().setFromNormalAndCoplanarPoint(normal, heightHandleMesh.position);
+
+            const intersectPoint = new THREE.Vector3();
+            raycaster.ray.intersectPlane(dragIntersectionPlane, intersectPoint);
+            
+            dragStartHeight = intersectPoint.y;
+            dragStartFloors = selectedParcel.params.floors;
+        }
+    }
+}
+
+// Pointer up event handler to release height dragging
+function onPointerUp(event) {
+    if (isDraggingHeight) {
+        isDraggingHeight = false;
+        controls.enabled = true; // Re-enable camera rotation
+    }
 }
