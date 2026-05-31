@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.3.0] - 2026-05-31
+
+- Fix clockwise polygon winding road offsets and slow down simulation speeds
+
 ## [0.2.9] - 2026-05-31
 
 - Add smooth solar shadow animation with interactive Play/Pause control

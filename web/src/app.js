@@ -1305,7 +1305,7 @@ function spawnSidewalkPedestrians(item, sidewalkRing) {
         pedestrians.push({
             mesh: pedGroup,
             path: pathPoints,
-            speed: 0.008 + Math.random() * 0.012,
+            speed: 0.002 + Math.random() * 0.003,
             progress: Math.random() * pathPoints.length,
             direction: Math.random() > 0.5 ? 1 : -1
         });
@@ -1982,7 +1982,7 @@ function generateTrafficCars() {
             trafficCars.push({
                 carMesh: carMesh,
                 roadRing: roadRing,
-                speed: 0.05 + Math.random() * 0.05,
+                speed: 0.0125 + Math.random() * 0.0125,
                 progress: Math.random() * roadRing.length
             });
         }
@@ -2406,13 +2406,23 @@ function calculateShapeArea(shape) {
 function offsetPolygonRing(ring, distance) {
     if (Math.abs(distance) <= 0.05) return ring.map(pt => { return {x: pt.x, y: pt.y}; });
 
+    // Detect winding order and flip distance if clockwise to ensure consistent inward/outward behavior
+    let sum = 0;
     const N = ring.length;
-    const offsetSegments = [];
-
-    // Calculate inward shifted segments
     for (let i = 0; i < N; i++) {
         const p1 = ring[i];
         const p2 = ring[(i + 1) % N];
+        sum += (p2.x - p1.x) * (p2.y + p1.y);
+    }
+    const activeDistance = (sum > 0) ? -distance : distance;
+
+    const N_pts = ring.length;
+    const offsetSegments = [];
+
+    // Calculate inward shifted segments
+    for (let i = 0; i < N_pts; i++) {
+        const p1 = ring[i];
+        const p2 = ring[(i + 1) % N_pts];
 
         const dx = p2.x - p1.x;
         const dy = p2.y - p1.y;
@@ -2424,8 +2434,8 @@ function offsetPolygonRing(ring, distance) {
         const ny = dx / len;
 
         offsetSegments.push({
-            p1: { x: p1.x + nx * distance, y: p1.y + ny * distance },
-            p2: { x: p2.x + nx * distance, y: p2.y + ny * distance },
+            p1: { x: p1.x + nx * activeDistance, y: p1.y + ny * activeDistance },
+            p2: { x: p2.x + nx * activeDistance, y: p2.y + ny * activeDistance },
             dir: { x: dx / len, y: dy / len }
         });
     }
@@ -2442,7 +2452,7 @@ function offsetPolygonRing(ring, distance) {
         const pt = intersectLines(s1.p1, s1.dir, s2.p1, s2.dir);
         if (pt) {
             const d1 = distToSegment(pt, ring[(i - 1 + M) % M], ring[i]);
-            const checkDist = Math.abs(distance);
+            const checkDist = Math.abs(activeDistance);
             if (d1 > checkDist * 4) return null; // self-intersection/degenerate
             insetRing.push(pt);
         } else {
