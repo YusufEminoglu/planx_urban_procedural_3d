@@ -71,6 +71,11 @@ const btnTour = document.getElementById('btn-tour');
 const btnMeasure = document.getElementById('btn-measure');
 const btnClearMeasure = document.getElementById('hud-btn-clear-measure');
 const crsWarningBannerEl = document.getElementById('crs-warning-banner');
+const btnGuide = document.getElementById('btn-guide');
+const btnGuideInline = document.getElementById('btn-guide-inline');
+const btnGuideClose = document.getElementById('btn-guide-close');
+const guidePanelEl = document.getElementById('guide-panel');
+const guideScrimEl = document.getElementById('guide-scrim');
 
 // View settings checkbox controls
 const toggleBuildingsEl = document.getElementById('toggle-buildings');
@@ -148,7 +153,7 @@ let gridHelper = null;
 function init() {
     // 1. Scene setup
     scene = new THREE.Scene();
-    scene.background = new THREE.Color(0xc7e7ff);
+    scene.background = new THREE.Color(0xe9f7ff);
 
     // 2. Sky Gradient Dome — procedural shader sphere replacing flat background
     const skyGeom = new THREE.SphereGeometry(2000, 32, 32);
@@ -189,8 +194,8 @@ function init() {
         }
     `;
     skyUniforms = {
-        uHorizonColor: { value: new THREE.Color(0xdaf5ff) },
-        uZenithColor:  { value: new THREE.Color(0x63b3ed) },
+        uHorizonColor: { value: new THREE.Color(0xf6fbff) },
+        uZenithColor:  { value: new THREE.Color(0x9ed8ff) },
         uStarIntensity: { value: 0.0 }
     };
     const skyMat = new THREE.ShaderMaterial({
@@ -211,11 +216,11 @@ function init() {
     renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
-    renderer.setClearColor(0xc7e7ff, 1);
+    renderer.setClearColor(0xe9f7ff, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.18;
+    renderer.toneMappingExposure = 1.32;
     document.getElementById('viewport').appendChild(renderer.domElement);
 
     // 5. Post-Processing Bloom
@@ -245,10 +250,10 @@ function init() {
     });
 
     // 7. Lighting
-    ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
+    ambientLight = new THREE.AmbientLight(0xffffff, 1.18);
     scene.add(ambientLight);
 
-    dirLight = new THREE.DirectionalLight(0xffffff, 1.15);
+    dirLight = new THREE.DirectionalLight(0xffffff, 1.38);
     dirLight.position.set(200, 450, 150);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
@@ -268,7 +273,7 @@ function init() {
     groundCanvas.width = 512;
     groundCanvas.height = 512;
     const gCtx = groundCanvas.getContext('2d');
-    gCtx.fillStyle = '#7f8fa3';
+    gCtx.fillStyle = '#d8e6ef';
     gCtx.fillRect(0, 0, 512, 512);
     // Draw subtle grid lines — each cell ≈ 10m  (512px / 24 cells ≈ 21px per cell)
     gCtx.strokeStyle = 'rgba(15, 23, 42, 0.04)';
@@ -288,7 +293,7 @@ function init() {
     groundGeom.rotateX(-Math.PI / 2);
     const groundMat = new THREE.MeshStandardMaterial({
         map: groundTexture,
-        color: 0xd7e2ee,
+        color: 0xf1f7fb,
         roughness: 0.95,
         metalness: 0.05
     });
@@ -300,7 +305,7 @@ function init() {
     // Subtle overlay grid (kept for fine detail but semi-transparent)
     const grid = new THREE.GridHelper(1200, 120, 0xb6c6d8, 0x7a8ba1);
     grid.position.y = -0.05;
-    grid.material.opacity = 0.18;
+    grid.material.opacity = 0.12;
     grid.material.transparent = true;
     grid.visible = toggleGridEl ? toggleGridEl.checked : false;
     scene.add(grid);
@@ -563,6 +568,19 @@ function setupInputListeners() {
         btnClearMeasure.addEventListener('click', clearAllMeasurements);
     }
 
+    if (btnGuide) {
+        btnGuide.addEventListener('click', openGuidePanel);
+    }
+    if (btnGuideInline) {
+        btnGuideInline.addEventListener('click', openGuidePanel);
+    }
+    if (btnGuideClose) {
+        btnGuideClose.addEventListener('click', closeGuidePanel);
+    }
+    if (guideScrimEl) {
+        guideScrimEl.addEventListener('click', closeGuidePanel);
+    }
+
     // Reload Data button
     if (btnReload) {
         btnReload.addEventListener('click', reloadData);
@@ -588,6 +606,33 @@ function setupInputListeners() {
 
     // Keyboard shortcuts
     window.addEventListener('keydown', handleKeyboardShortcuts);
+}
+
+function isUiEventTarget(target) {
+    return !!(
+        target.closest('#control-dock') ||
+        target.closest('.hud-bar') ||
+        target.closest('.loading-screen') ||
+        target.closest('#guide-panel') ||
+        target.closest('#guide-scrim')
+    );
+}
+
+function openGuidePanel() {
+    if (!guidePanelEl) return;
+    guidePanelEl.classList.remove('hidden');
+    if (guideScrimEl) {
+        guideScrimEl.classList.remove('hidden');
+    }
+}
+
+function closeGuidePanel() {
+    if (guidePanelEl) {
+        guidePanelEl.classList.add('hidden');
+    }
+    if (guideScrimEl) {
+        guideScrimEl.classList.add('hidden');
+    }
 }
 
 // Update lights and sky theme based on solar time of day
@@ -623,10 +668,10 @@ function updateSolarPhysics(timeVal) {
             skyUniforms.uZenithColor.value.setHex(0x000005);
             skyUniforms.uStarIntensity.value = 0.9;
         } else {
-            scene.background = new THREE.Color(0xc7e7ff);
-            if (renderer) renderer.setClearColor(0xc7e7ff, 1);
-            skyUniforms.uHorizonColor.value.setHex(0xdaf5ff); // clear day horizon
-            skyUniforms.uZenithColor.value.setHex(0x63b3ed);  // rich but readable sky
+            scene.background = new THREE.Color(0xe9f7ff);
+            if (renderer) renderer.setClearColor(0xe9f7ff, 1);
+            skyUniforms.uHorizonColor.value.setHex(0xf6fbff);
+            skyUniforms.uZenithColor.value.setHex(0x9ed8ff);
             skyUniforms.uStarIntensity.value = 0.0;
         }
     }
@@ -638,11 +683,11 @@ function updateSolarPhysics(timeVal) {
     } else {
         // Daylight Mode
         ambientLight.color.setHex(0xffffff);
-        ambientLight.intensity = 0.95; // bright first-view city readability
+        ambientLight.intensity = 1.18;
         
         // Solar intensity peaks at noon
         const peakFactor = Math.sin(angle);
-        dirLight.intensity = 0.75 + peakFactor * 0.65; // High intensity sun rays
+        dirLight.intensity = 0.92 + peakFactor * 0.7;
     }
 
     // Update active building emission light and streetlights visibility
@@ -3598,7 +3643,7 @@ function getParcelItemFromObject(obj) {
 
 // Click listener to select building and open panel details
 function onDocumentClick(event) {
-    if (event.target.closest('#control-dock') || event.target.closest('.hud-bar') || event.target.closest('.loading-screen')) return;
+    if (isUiEventTarget(event.target)) return;
 
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
@@ -4527,10 +4572,20 @@ init();
 
 // ───────────────────────── Keyboard Shortcuts ─────────────────────────
 function handleKeyboardShortcuts(event) {
+    if (event.key === 'Escape' && guidePanelEl && !guidePanelEl.classList.contains('hidden')) {
+        closeGuidePanel();
+        return;
+    }
+
     // Ignore shortcuts when typing in inputs
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT' || event.target.tagName === 'TEXTAREA') return;
 
     switch (event.key.toLowerCase()) {
+        case 'h':
+        case '?':
+            openGuidePanel();
+            break;
+
         case 'r': // Reset camera
             camera.position.set(0, 300, 450);
             controls.target.set(0, 0, 0);
@@ -4834,7 +4889,7 @@ async function reloadData() {
 let hoveredParcel = null;
 
 function onPointerMove(event) {
-    if (event.target.closest('#control-dock') || event.target.closest('.hud-bar') || event.target.closest('.loading-screen')) {
+    if (isUiEventTarget(event.target)) {
         document.body.style.cursor = 'default';
         return;
     }
@@ -5120,7 +5175,7 @@ function removeHeightHandle() {
 
 // Pointer down event handler to detect starting of height or setback dragging
 function onPointerDown(event) {
-    if (event.target.closest('#control-dock') || event.target.closest('.hud-bar') || event.target.closest('.loading-screen')) return;
+    if (isUiEventTarget(event.target)) return;
 
     mouse.x = (event.clientX / window.innerWidth) * 2 - 1;
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;

@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.11] - 2026-06-01
+
+- Brighten the web cockpit with a light planning-workspace UI palette and higher first-view daylight scene exposure.
+- Add an embedded Turkish HTML guide explaining the QGIS-to-browser workflow, parcel editing, compliance checks, auto-solve tools, sync, export, and shortcuts.
+- Add Guide controls in the HUD and cockpit header, with H/? and Escape keyboard support.
+
 ## [0.1.10] - 2026-05-31
 
 - Finalize the Hub-ready procedural cockpit on the 0.1 line with hardened QGIS sync threading, edit-session safety, and local server routing.

@@ -48,7 +48,7 @@
             if (loading) loading.style.display = 'none';
         };
     </script>
-    <link rel="stylesheet" href="style.css?v=0.1.10">
+    <link rel="stylesheet" href="style.css?v=0.1.11">
     <script type="importmap">
         {
             "imports": {
@@ -69,7 +69,7 @@
         <div class="spinner"></div>
         <h2>PlanX Urban Procedural 3D</h2>
         <p id="loading-text">Loading layer features from QGIS...</p>
-        <div class="version-badge">v0.1.10 — Procedural Engine</div>
+        <div class="version-badge">v0.1.11 - Procedural Engine</div>
     </div>
 
     <!-- 3D Canvas Viewport -->
@@ -77,8 +77,9 @@
 
     <!-- Control Cockpit Dock -->
     <div id="control-dock" class="glass-panel">
-        <div class="dock-header">
+        <div class="dock-header dock-title-row">
             <h3>Parametric Cockpit</h3>
+            <button id="btn-guide-inline" class="mini-guide-button" type="button">Guide</button>
         </div>
 
         <div id="selection-placeholder" class="dock-note">
@@ -333,14 +334,63 @@
         <div id="btn-tour" class="hud-chip hud-btn" title="Toggle Cinematic Tour (Orbit Camera)">🎬 Cinematic Tour</div>
         <div id="btn-measure" class="hud-chip hud-btn" title="Toggle 3D Ruler / Measurement Tool">📏 Measure</div>
         <div id="hud-btn-clear-measure" class="hud-chip hud-btn hidden" style="color: #ef4444;" title="Clear all 3D measurements">❌ Clear</div>
-        <div class="hud-chip hud-shortcuts" title="R: Reset camera | F: Focus selected | N: Toggle night | G: Toggle grid">
+        <div id="btn-guide" class="hud-chip hud-btn" title="Open quick guide">Guide</div>
+        <div class="hud-chip hud-shortcuts" title="R: Reset camera | F: Focus selected | N: Toggle night | G: Toggle grid | H: Guide">
             ⌨ Shortcuts
         </div>
     </div>
 
+    <div id="guide-scrim" class="guide-scrim hidden"></div>
+    <section id="guide-panel" class="guide-panel glass-panel hidden" role="dialog" aria-labelledby="guide-title" aria-modal="false">
+        <div class="guide-header">
+            <div>
+                <p class="guide-kicker">Hızlı kullanım rehberi</p>
+                <h2 id="guide-title">PlanX Urban Procedural 3D nasıl kullanılır?</h2>
+            </div>
+            <button id="btn-guide-close" class="guide-close" type="button" aria-label="Close guide">x</button>
+        </div>
+
+        <div class="guide-grid">
+            <article class="guide-step">
+                <span class="guide-step-no">1</span>
+                <h3>QGIS katmanını hazırla</h3>
+                <p>Parsel, ada veya yapı adası sınırlarını içeren bir poligon vektör katmanı seç. Metre bazlı projeksiyon en doğru sonuçları verir.</p>
+            </article>
+            <article class="guide-step">
+                <span class="guide-step-no">2</span>
+                <h3>Eklentiyi çalıştır</h3>
+                <p>QGIS dialogunda katmanı seç, portu bırak ve Run düğmesine bas. Tarayıcıda bu 3D cockpit açılır.</p>
+            </article>
+            <article class="guide-step">
+                <span class="guide-step-no">3</span>
+                <h3>Bir parsel seç</h3>
+                <p>3D sahnede parselin üstüne tıkla. Sağ panelde imar parametreleri, kütle tipi ve TAKS/KAKS kontrolleri açılır.</p>
+            </article>
+            <article class="guide-step">
+                <span class="guide-step-no">4</span>
+                <h3>Tasarımı değiştir</h3>
+                <p>Kat adedi, çekme mesafesi, kat yüksekliği, kullanım türü, çatı tipi ve kütle tipolojisini ayarla. Sonuç sahnede anlık güncellenir.</p>
+            </article>
+            <article class="guide-step">
+                <span class="guide-step-no">5</span>
+                <h3>Uygunluğu kontrol et</h3>
+                <p>Compliance Dashboard, BCR/TAKS, FAR/KAKS, yükseklik, nüfus ve sürdürülebilirlik metriklerini yeşil/kırmızı durumla gösterir.</p>
+            </article>
+            <article class="guide-step">
+                <span class="guide-step-no">6</span>
+                <h3>QGIS'e geri yaz</h3>
+                <p>Sync Parameters to QGIS düğmesi seçili değişiklikleri katmana yazar. Gerekli PlanX alanları yoksa eklenti onları otomatik ekler.</p>
+            </article>
+        </div>
+
+        <div class="guide-note">
+            <strong>İpuçları:</strong> Auto-Solve Selected Parcel seçili parseli sınırlar içinde iyileştirir. Auto-Solve City tüm parselleri optimize eder. R kamerayı sıfırlar, F seçili parsele odaklanır, N gece/gündüz değiştirir, G zemindeki grid'i açar.
+        </div>
+    </section>
+
     <!-- Floating 3D Measurement Overlay Container -->
     <div id="measurement-overlay-container" style="position: absolute; top: 0; left: 0; pointer-events: none; z-index: 15; width: 100%; height: 100%; overflow: hidden;"></div>
  
-    <script type="module" src="app.js?v=0.1.10"></script>
+    <script type="module" src="app.js?v=0.1.11"></script>
 </body>
 </html>
