@@ -154,6 +154,34 @@ body, html {
     margin-top: 5px;
 }
 
+.dock-kicker {
+    color: var(--accent);
+    font-size: 0.68rem;
+    font-weight: 800;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    margin-bottom: 3px;
+}
+
+.workflow-strip {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px;
+    background: rgba(15, 118, 110, 0.06);
+    border: 1px solid rgba(15, 118, 110, 0.14);
+    border-radius: 8px;
+}
+
+.workflow-strip span {
+    color: var(--text-secondary);
+    font-size: 0.72rem;
+    font-weight: 800;
+    line-height: 1.25;
+    text-align: center;
+    text-transform: uppercase;
+}
+
 .dock-note {
     font-size: 0.8rem;
     color: var(--text-secondary);
@@ -327,6 +355,25 @@ input[type="range"]::-webkit-slider-thumb:hover {
     padding: 4px 10px;
     border-radius: 6px;
     letter-spacing: 0.02em;
+}
+
+.brand-chip {
+    background: rgba(15, 118, 110, 0.92);
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.28);
+    box-shadow: 0 8px 20px rgba(15, 118, 110, 0.18);
+}
+
+.solve-city-chip {
+    background: rgba(124, 58, 237, 0.12);
+    color: #5b21b6;
+    border-color: rgba(124, 58, 237, 0.25);
+    font-weight: 800;
+}
+
+.solve-city-chip:hover {
+    background: rgba(124, 58, 237, 0.18);
+    border-color: rgba(124, 58, 237, 0.38);
 }
 
 .hud-btn {
@@ -592,10 +639,11 @@ input[type="range"]::-webkit-slider-thumb:hover {
     background: var(--accent);
     color: white;
     border: none;
-    width: 28px;
+    min-width: 48px;
     height: 28px;
+    padding: 0 10px;
     border-radius: 6px;
-    font-size: 0.85rem;
+    font-size: 0.72rem;
     font-weight: bold;
     cursor: pointer;
     display: flex;
@@ -848,6 +896,10 @@ input[type="range"]::-webkit-slider-thumb:hover {
         white-space: normal;
         padding: 6px 8px;
         line-height: 1.2;
+    }
+
+    .workflow-strip {
+        grid-template-columns: 1fr;
     }
 
     #control-dock {

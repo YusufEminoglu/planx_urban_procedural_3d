@@ -9,7 +9,7 @@ It enables urban planners to select vector parcel/block polygons, run a local Py
 - **Interactive 3D Web Cockpit**: Live rendering of building envelopes, setbacks, and parcel footprints using Three.js.
 - **Parametric Generation**: Instantly switch building typologies (Tower, Slab, Courtyard) and adjust floors, floor heights, and setbacks using simple sliders.
 - **Two-Way Synchronization**: Clicking "Sync to QGIS" sends design choices and recalculated footprint geometries back to QGIS, updating layers in real-time.
-- **Zoning Compliance**: Real-time evaluation of BCR (T.A.K.S) and FAR (K.A.K.S) against zoning rules, flagging limits immediately.
+- **Zoning Compliance**: Real-time evaluation of BCR (Building Coverage Ratio) and FAR (Floor Area Ratio) against zoning rules, flagging limits immediately.
 - **Lightweight Architecture**: No heavy external dependencies, allowing fast loading times and ensuring the plugin ZIP is extremely compact.
 
 ## Project Structure
@@ -29,7 +29,7 @@ planx_urban_procedural_3d/
     assets/            # Shared Three.js and vendor assets
     src/
       index.html       # Layout structure for the 3D cockpit UI
-      style.css        # Glassmorphic dark-mode interface styling
+      style.css        # Light professional planning-cockpit styling
       app.js           # Core Three.js render engine and parametric math
 ```
 

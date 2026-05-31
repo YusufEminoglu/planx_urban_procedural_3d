@@ -155,7 +155,7 @@ function init() {
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0xe9f7ff);
 
-    // 2. Sky Gradient Dome — procedural shader sphere replacing flat background
+    // 2. Sky gradient dome: procedural shader sphere replacing flat background
     const skyGeom = new THREE.SphereGeometry(2000, 32, 32);
     const skyVertShader = `
         varying vec3 vWorldPosition;
@@ -181,7 +181,7 @@ function init() {
             float t = clamp(h, 0.0, 1.0);
             vec3 sky = mix(uHorizonColor, uZenithColor, t);
 
-            // Star field — tiny bright dots at high elevation
+            // Star field: tiny bright dots at high elevation
             if (uStarIntensity > 0.01) {
                 vec3 dir = normalize(vWorldPosition);
                 vec2 starUV = dir.xz / (dir.y + 1.0) * 200.0;
@@ -275,7 +275,7 @@ function init() {
     const gCtx = groundCanvas.getContext('2d');
     gCtx.fillStyle = '#d8e6ef';
     gCtx.fillRect(0, 0, 512, 512);
-    // Draw subtle grid lines — each cell ≈ 10m  (512px / 24 cells ≈ 21px per cell)
+    // Draw subtle grid lines. Each cell is about 10 m.
     gCtx.strokeStyle = 'rgba(15, 23, 42, 0.04)';
     gCtx.lineWidth = 0.5;
     const cellSize = 512 / 24;
@@ -1181,7 +1181,7 @@ function parseGeoJSON(data, options = {}) {
 
     // Reset default placeholder message
     if (placeholderEl) {
-        placeholderEl.innerHTML = "Please click on a parcel in the 3D scene to start designing.";
+        placeholderEl.innerHTML = "Click a parcel in the 3D scene to inspect it, tune planning controls, and send the result back to QGIS.";
     }
 
     // Check if layer CRS is geographic
@@ -2190,7 +2190,7 @@ function rebuildParcel3D(item) {
     updateParcelGroundColor(item, hasViolation);
 }
 
-// ───────────────────────── Low Poly Procedural Vegetation ─────────────────────────
+// Low poly procedural vegetation
 function buildLowPolyTree(x, y, z, height, style) {
     style = style || 'conifer';
     const treeGroup = new THREE.Group();
@@ -2240,7 +2240,7 @@ function buildLowPolyTree(x, y, z, height, style) {
         trunk.castShadow = true;
         treeGroup.add(trunk);
 
-        // Fan leaves — elongated flattened cones radiating outward
+        // Fan leaves: elongated flattened cones radiating outward
         const leafCount = 7;
         const leafLength = height * 0.45;
         const leafMat = new THREE.MeshStandardMaterial({ color: 0x22c55e, roughness: 0.8, side: THREE.DoubleSide });
@@ -2260,7 +2260,7 @@ function buildLowPolyTree(x, y, z, height, style) {
         }
 
     } else {
-        // Conifer (default): stacked cones — the classic procedural look
+        // Conifer (default): stacked cones for the classic procedural look
         const trunkHeight = height * 0.35;
         const trunkRadius = trunkHeight * 0.12;
         const trunkGeom = new THREE.CylinderGeometry(trunkRadius * 0.7, trunkRadius, trunkHeight, 8);
@@ -2289,7 +2289,7 @@ function buildLowPolyTree(x, y, z, height, style) {
     return treeGroup;
 }
 
-// ───────────────────────── Animated Pedestrians ─────────────────────────
+// Animated pedestrians
 function spawnSidewalkPedestrians(item, sidewalkRing) {
     if (!sidewalkRing || sidewalkRing.length < 3) return;
 
@@ -2387,7 +2387,7 @@ function updatePedestrians() {
     });
 }
 
-// ───────────────────────── Oriented Bounding Box Helpers ─────────────────────────
+// Oriented bounding box helpers
 function getOrientedBounds(ring) {
     let maxLen = -1;
     let bestStart = null, bestEnd = null;
@@ -3740,7 +3740,7 @@ function selectParcel(item) {
     }
 
     metFid.textContent = item.fid;
-    metArea.textContent = Math.round(item.area).toLocaleString() + " m²";
+    metArea.textContent = Math.round(item.area).toLocaleString() + " sq m";
 
     placeholderEl.classList.add('hidden');
     controlsEl.classList.remove('hidden');
@@ -4122,8 +4122,8 @@ function updateDashboard(item) {
     const far = item.area > 0 ? (gfa / item.area) : 0;
 
     // Update UI elements
-    metFootprint.textContent = Math.round(footprintArea).toLocaleString() + " m²";
-    metGfa.textContent = Math.round(gfa).toLocaleString() + " m²";
+    metFootprint.textContent = Math.round(footprintArea).toLocaleString() + " sq m";
+    metGfa.textContent = Math.round(gfa).toLocaleString() + " sq m";
     metHeight.textContent = item.params.usage === 'Park' ? "0.0 m" : height.toFixed(1) + " m";
     
     // Actual vs Limit Text Labels
@@ -4154,11 +4154,11 @@ function updateDashboard(item) {
     metStatus.textContent = violated ? "VIOLATION" : "COMPLIANT";
     metStatus.className = "stat-val status-badge " + (violated ? "violation" : "compliant");
 
-    // ── Population Estimator ──
+    // Population estimator
     const usage = item.params.usage;
     let dwellingUnits = 0;
     let population = 0;
-    const AVG_UNIT_SIZE = 100; // m² per dwelling unit
+    const AVG_UNIT_SIZE = 100; // sq m per dwelling unit
     const AVG_PERSONS = 2.8;   // persons per household
 
     if (usage === 'Residential') {
@@ -4170,7 +4170,7 @@ function updateDashboard(item) {
         dwellingUnits = Math.floor(residentialGfa / AVG_UNIT_SIZE);
         population = Math.round(dwellingUnits * AVG_PERSONS);
     } else if (usage === 'Commercial' || usage === 'Civic') {
-        // Estimate workforce: 1 person per 15m² office/commercial
+        // Estimate workforce: 1 person per 15 sq m office/commercial
         dwellingUnits = 0;
         population = Math.round(gfa / 15);
     }
@@ -4181,7 +4181,7 @@ function updateDashboard(item) {
     if (metPopulation) metPopulation.textContent = usage === 'Park' ? '0' : population.toLocaleString();
     if (metDensity) metDensity.textContent = usage === 'Park' ? '0 pp/ha' : `${densityPpHa.toLocaleString()} pp/ha`;
 
-    // ── Sustainability Indicators ──
+    // Sustainability indicators
     const osr = gfa > 0 ? ((item.area - footprintArea) / gfa) : 0;
     
     let carbonFactor = 0;
@@ -4400,7 +4400,7 @@ async function syncToQGIS() {
     }
 }
 
-// ───────────────────────── Mathematical Geometry Helpers ─────────────────────────
+// Mathematical geometry helpers
 
 // Standard Polygon Area calculation (Shoelace formula)
 function calculatePolygonArea(ring) {
@@ -4570,7 +4570,7 @@ function buildSlabShape(ring, width) {
 // Start the application
 init();
 
-// ───────────────────────── Keyboard Shortcuts ─────────────────────────
+// Keyboard shortcuts
 function handleKeyboardShortcuts(event) {
     if (event.key === 'Escape' && guidePanelEl && !guidePanelEl.classList.contains('hidden')) {
         closeGuidePanel();
@@ -4633,7 +4633,7 @@ function handleKeyboardShortcuts(event) {
     }
 }
 
-// ───────────────────────── Apply To All Parcels ─────────────────────────
+// Apply to all parcels
 function applyToAllParcels() {
     if (!selectedParcel) {
         alert('Please select a parcel first to use as the template.');
@@ -4682,7 +4682,7 @@ function applyToAllParcels() {
     btnApplyAll.textContent = 'Apply to All Parcels';
 }
 
-// ───────────────────────── WebGL Memory & Resource Cleanup ─────────────────────────
+// WebGL memory and resource cleanup
 
 function clearScene() {
     // 1. Deselect any active parcel
@@ -4789,7 +4789,7 @@ function disposeSingleMaterial(m) {
     m.dispose();
 }
 
-// ───────────────────────── Dynamic Layers Visibility ─────────────────────────
+// Dynamic layer visibility
 
 function updateLayersVisibility() {
     const showBuildings = toggleBuildingsEl ? toggleBuildingsEl.checked : true;
@@ -4840,7 +4840,7 @@ function updateLayersVisibility() {
     });
 }
 
-// ───────────────────────── Reload Data from QGIS ─────────────────────────
+// Reload data from QGIS
 
 async function reloadData() {
     if (btnReload) {
@@ -4884,7 +4884,7 @@ async function reloadData() {
     }
 }
 
-// ───────────────────────── Pointer Hover highlights ─────────────────────────
+// Pointer hover highlights
 
 let hoveredParcel = null;
 
@@ -5072,12 +5072,12 @@ function setBuildingHoverHighlight(meshOrGroup, isHovered) {
 function toggleTimeAnimation() {
     isTimeAnimating = !isTimeAnimating;
     if (isTimeAnimating) {
-        btnPlayTime.textContent = "⏸"; // Pause icon
+        btnPlayTime.textContent = "Pause";
         btnPlayTime.title = "Pause Shadow Animation";
         btnPlayTime.classList.add('playing');
         animateTime();
     } else {
-        btnPlayTime.textContent = "▶"; // Play icon
+        btnPlayTime.textContent = "Play";
         btnPlayTime.title = "Animate Solar Shadows";
         btnPlayTime.classList.remove('playing');
         if (timeAnimationId) {
@@ -5319,7 +5319,7 @@ function getDistanceToPolygon(pt, ring) {
     return minDist;
 }
 
-// ───────────────────────── 3D Ruler / Measurement Tool ─────────────────────────
+// 3D ruler and measurement tool
 
 // Initialize the temporary measurement line and HTML label marker
 function initTemporaryMeasurementAssets() {
@@ -5508,9 +5508,9 @@ function project3DToScreen(vec3) {
     return { x, y };
 }
 
-// ───────────────────────── Procedural City Solver & Optimization ─────────────────────────
+// Procedural city solver and optimization
 
-// Auto-solve zoning constraints (TAKS/KAKS) for a specific parcel feature
+// Auto-solve zoning constraints for a specific parcel feature
 function optimizeParcelZoning(item) {
     if (item.params.usage === 'Park') {
         item.params.floors = 0;
@@ -5552,12 +5552,12 @@ function optimizeParcelZoning(item) {
 
     item.params.typology = selectedTypology;
 
-    // 2. Search for the optimal setback distance that satisfies the Max BCR limit (TAKS)
+    // 2. Search for the optimal setback distance that satisfies the maximum BCR limit.
     let bestSetback = 3.0;
     let bestFootprint = 0;
     let bcrCompliantFound = false;
 
-    // Search from 8.0m down to 2.0m (we want the smallest setback that doesn't violate TAKS)
+    // Search from 8.0 m down to 2.0 m for the smallest setback that keeps BCR compliant.
     for (let sb = 8.0; sb >= 2.0; sb -= 0.5) {
         const insetRing = offsetPolygonRing(item.outerRing, sb);
         if (!insetRing || insetRing.length < 3) continue;
@@ -5649,7 +5649,7 @@ function optimizeParcelZoning(item) {
 
     item.params.setback = bestSetback;
 
-    // 3. Optimize Floor Count (Maximize GFA up to KAKS and Height limits)
+    // 3. Optimize floor count by maximizing GFA up to FAR and height limits.
     let maxFloorsHeight = Math.floor(maxHeight / floorHeight);
     let maxFloorsFar = bestFootprint > 0 ? Math.floor((maxFar * item.area) / bestFootprint) : 1;
 
@@ -5783,7 +5783,7 @@ function solveCityLayout() {
     alert(`Procedural solver successfully optimized layout constraints for all ${parcelFeatures.length} parcels in the city!`);
 }
 
-// ───────────────────────── Procedural Landscaping & Facade Assets ─────────────────────────
+// Procedural landscaping and facade assets
 
 // Generate a grass garden lawn in the setback zone
 function buildSetbackLawn(item, insetRing) {

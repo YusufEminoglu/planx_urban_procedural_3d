@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-"""PlanX Urban Procedural 3D — main plugin class.
+"""PlanX Urban Procedural 3D main plugin class.
 """
 from __future__ import annotations
 

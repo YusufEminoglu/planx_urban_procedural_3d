@@ -1,9 +1,15 @@
 # Changelog
 
+## [0.1.12] - 2026-06-01
+
+- Convert the web cockpit and QGIS launcher to global English-only copy.
+- Replace localized zoning terminology with BCR/FAR language and ASCII-safe units.
+- Polish the light planning cockpit with workflow cues, release badges, and guide styling.
+
 ## [0.1.11] - 2026-06-01
 
 - Brighten the web cockpit with a light planning-workspace UI palette and higher first-view daylight scene exposure.
-- Add an embedded Turkish HTML guide explaining the QGIS-to-browser workflow, parcel editing, compliance checks, auto-solve tools, sync, export, and shortcuts.
+- Add an embedded HTML guide explaining the QGIS-to-browser workflow, parcel editing, compliance checks, auto-solve tools, sync, export, and shortcuts.
 - Add Guide controls in the HUD and cockpit header, with H/? and Escape keyboard support.
 
 ## [0.1.10] - 2026-05-31
@@ -114,7 +120,7 @@
 - Implement advanced typologies, solar orbit arc, sidewalk/courtyard trees, and night window glow
 
 All notable changes to **PlanX Urban Procedural 3D** are documented here.
-Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) · versioning: [SemVer](https://semver.org/).
+Format: [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) - versioning: [SemVer](https://semver.org/).
 
 ## [0.1.3] - 2026-05-30
 

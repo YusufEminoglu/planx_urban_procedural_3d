@@ -4,9 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>PlanX Urban Procedural 3D Cockpit</title>
-    <!-- Visual On-Screen JS Error Catcher -->
     <script>
-        window.onerror = function(message, source, lineno, colno, error) {
+        window.onerror = function(message, source, lineno, colno) {
             const errDiv = document.createElement('div');
             errDiv.style.position = 'fixed';
             errDiv.style.top = '0';
@@ -22,7 +21,7 @@
             errDiv.style.whiteSpace = 'pre-wrap';
             errDiv.innerHTML = `<strong>JavaScript Error Detected:</strong><br>${message}<br><br>Source: ${source}<br>Line: ${lineno}, Column: ${colno}`;
             document.body.appendChild(errDiv);
-            
+
             const loading = document.getElementById('loading');
             if (loading) loading.style.display = 'none';
             return false;
@@ -43,12 +42,12 @@
             errDiv.style.whiteSpace = 'pre-wrap';
             errDiv.innerHTML = `<strong>Unhandled Promise Rejection:</strong><br>${event.reason}`;
             document.body.appendChild(errDiv);
-            
+
             const loading = document.getElementById('loading');
             if (loading) loading.style.display = 'none';
         };
     </script>
-    <link rel="stylesheet" href="style.css?v=0.1.11">
+    <link rel="stylesheet" href="style.css?v=0.1.12">
     <script type="importmap">
         {
             "imports": {
@@ -59,31 +58,37 @@
     </script>
 </head>
 <body>
-    <!-- CRS Warning Banner -->
     <div id="crs-warning-banner" class="warning-banner hidden">
-        <span class="warning-icon">⚠</span>
-        <span class="warning-text">Geographic CRS (degrees) detected. Distance metrics & heights will be distorted. Reproject to a projected CRS.</span>
+        <span class="warning-icon">!</span>
+        <span class="warning-text">Geographic CRS detected. Distance metrics and heights may be distorted. Reproject to a projected CRS for production work.</span>
     </div>
 
     <div id="loading" class="loading-screen">
         <div class="spinner"></div>
         <h2>PlanX Urban Procedural 3D</h2>
         <p id="loading-text">Loading layer features from QGIS...</p>
-        <div class="version-badge">v0.1.11 - Procedural Engine</div>
+        <div class="version-badge">v0.1.12 - Global Release Candidate</div>
     </div>
 
-    <!-- 3D Canvas Viewport -->
     <div id="viewport"></div>
 
-    <!-- Control Cockpit Dock -->
     <div id="control-dock" class="glass-panel">
         <div class="dock-header dock-title-row">
-            <h3>Parametric Cockpit</h3>
+            <div>
+                <p class="dock-kicker">Scenario Editor</p>
+                <h3>Parametric Cockpit</h3>
+            </div>
             <button id="btn-guide-inline" class="mini-guide-button" type="button">Guide</button>
         </div>
 
         <div id="selection-placeholder" class="dock-note">
-            Please click on a parcel in the 3D scene to start designing.
+            Click a parcel in the 3D scene to inspect it, tune planning controls, and send the result back to QGIS.
+        </div>
+
+        <div class="workflow-strip" aria-label="Workflow overview">
+            <span>1 Select parcel</span>
+            <span>2 Tune scenario</span>
+            <span>3 Sync to QGIS</span>
         </div>
 
         <div id="editor-controls" class="hidden">
@@ -117,7 +122,6 @@
                 </label>
             </div>
 
-            <!-- Stepped Tower Parameters (dynamically shown) -->
             <div id="stepped-tower-controls" class="hidden" style="margin-top: 10px; border-left: 2px solid var(--accent); padding-left: 10px;">
                 <div class="control-group" style="margin-bottom: 8px;">
                     <label>Stepback Interval: <span id="val-stepback-interval">4</span> floors
@@ -149,7 +153,7 @@
                         <option value="Hipped">Hipped (Clay Tiles)</option>
                         <option value="Gable">Gable (Classic Slanted)</option>
                         <option value="Mansard">Mansard (French Slate)</option>
-                        <option value="Flat">Flat (with Helipad & HVAC)</option>
+                        <option value="Flat">Flat (Helipad and HVAC)</option>
                     </select>
                 </label>
             </div>
@@ -176,7 +180,7 @@
                 <label>Solar Time: <span id="val-time">12:00</span></label>
                 <div class="time-control-row">
                     <input type="range" id="input-time" min="6.0" max="22.0" step="0.1" value="12.0" style="flex: 1; margin: 0;">
-                    <button id="btn-play-time" class="play-button" title="Animate Solar Shadows">▶</button>
+                    <button id="btn-play-time" class="play-button" title="Animate solar shadows">Play</button>
                 </div>
             </div>
 
@@ -187,19 +191,19 @@
             </div>
 
             <div class="control-group">
-                <label>Max BCR (T.A.K.S) <span class="term-desc">Taban Alanı Kat Sayısı</span>: <span id="val-max-bcr">0.45</span>
+                <label>Max BCR <span class="term-desc">Building Coverage Ratio</span>: <span id="val-max-bcr">0.45</span>
                     <input type="range" id="input-max-bcr" min="0.1" max="0.9" step="0.05" value="0.45">
                 </label>
             </div>
 
             <div class="control-group">
-                <label>Max FAR (K.A.K.S) <span class="term-desc">Kat Alanı Kat Sayısı</span>: <span id="val-max-far">2.5</span>
+                <label>Max FAR <span class="term-desc">Floor Area Ratio</span>: <span id="val-max-far">2.5</span>
                     <input type="range" id="input-max-far" min="0.5" max="8.0" step="0.1" value="2.5">
                 </label>
             </div>
 
             <div class="control-group">
-                <label>Max Height Limit (Hmax): <span id="val-max-height">18.0</span> m
+                <label>Max Height Limit: <span id="val-max-height">18.0</span> m
                     <input type="range" id="input-max-height" min="3.0" max="100.0" step="1.0" value="18.0">
                 </label>
             </div>
@@ -224,7 +228,7 @@
                 </label>
                 <label class="checkbox-container">
                     <input type="checkbox" id="toggle-sidewalks" checked>
-                    Show Sidewalks & Trees
+                    Show Sidewalks and Trees
                 </label>
                 <label class="checkbox-container">
                     <input type="checkbox" id="toggle-pedestrians" checked>
@@ -248,18 +252,17 @@
 
             <div class="stat-row">
                 <span>Footprint Area:</span>
-                <span id="metric-footprint" class="stat-val">- m²</span>
+                <span id="metric-footprint" class="stat-val">- sq m</span>
             </div>
             <div class="stat-row">
                 <span>Gross Floor Area (GFA):</span>
-                <span id="metric-gfa" class="stat-val">- m²</span>
+                <span id="metric-gfa" class="stat-val">- sq m</span>
             </div>
             <div class="stat-row">
                 <span>Building Height:</span>
                 <span id="metric-height" class="stat-val">- m</span>
             </div>
 
-            <!-- Visual Progress Gauges -->
             <div class="stat-row-vertical">
                 <div class="gauge-header">
                     <span>BCR (Actual / Max):</span>
@@ -289,15 +292,15 @@
 
             <div class="dock-header"><h4>Population Estimator</h4></div>
             <div class="stat-row">
-                <span>Est. Dwelling Units:</span>
+                <span>Estimated Units:</span>
                 <span id="metric-units" class="stat-val">-</span>
             </div>
             <div class="stat-row">
-                <span>Est. Population:</span>
+                <span>Estimated Population:</span>
                 <span id="metric-population" class="stat-val">-</span>
             </div>
             <div class="stat-row">
-                <span>Pop. Density:</span>
+                <span>Population Density:</span>
                 <span id="metric-density" class="stat-val">- pp/ha</span>
             </div>
 
@@ -305,14 +308,14 @@
 
             <div class="dock-header"><h4>Sustainability Indicators</h4></div>
             <div class="stat-row">
-                <span>Open Space Ratio (OSR):</span>
+                <span>Open Space Ratio:</span>
                 <span id="metric-osr" class="stat-val">-</span>
             </div>
             <div class="stat-row">
                 <span>Carbon Footprint:</span>
                 <span id="metric-carbon" class="stat-val">- t CO2e/yr</span>
             </div>
-            <div class="stat-row" title="Estimated surface stormwater runoff coefficient (0.0 to 1.0)">
+            <div class="stat-row" title="Estimated surface stormwater runoff coefficient from 0.0 to 1.0">
                 <span>Stormwater Runoff:</span>
                 <span id="metric-runoff" class="stat-val">-</span>
             </div>
@@ -326,17 +329,16 @@
         </div>
     </div>
 
-    <!-- HUD Indicators -->
     <div class="hud-bar glass-panel">
-        <div class="hud-chip" style="font-weight: 800; background: linear-gradient(135deg, #10b981, #0ea5e9); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">PlanX Urban 3D</div>
+        <div class="hud-chip brand-chip">PlanX Urban 3D</div>
         <div class="hud-chip">Total Parcels: <span id="hud-total-parcels">0</span></div>
-        <div id="btn-solve-city" class="hud-chip hud-btn" style="background: rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.4);" title="Optimize and Auto-Solve all parcels according to TAKS/KAKS constraints">🪄 Auto-Solve City</div>
-        <div id="btn-tour" class="hud-chip hud-btn" title="Toggle Cinematic Tour (Orbit Camera)">🎬 Cinematic Tour</div>
-        <div id="btn-measure" class="hud-chip hud-btn" title="Toggle 3D Ruler / Measurement Tool">📏 Measure</div>
-        <div id="hud-btn-clear-measure" class="hud-chip hud-btn hidden" style="color: #ef4444;" title="Clear all 3D measurements">❌ Clear</div>
+        <div id="btn-solve-city" class="hud-chip hud-btn solve-city-chip" title="Optimize all parcels against BCR/FAR constraints">Auto-Solve City</div>
+        <div id="btn-tour" class="hud-chip hud-btn" title="Toggle cinematic orbit camera">Cinematic Tour</div>
+        <div id="btn-measure" class="hud-chip hud-btn" title="Toggle 3D ruler and measurement tool">Measure</div>
+        <div id="hud-btn-clear-measure" class="hud-chip hud-btn hidden" style="color: #ef4444;" title="Clear all 3D measurements">Clear</div>
         <div id="btn-guide" class="hud-chip hud-btn" title="Open quick guide">Guide</div>
         <div class="hud-chip hud-shortcuts" title="R: Reset camera | F: Focus selected | N: Toggle night | G: Toggle grid | H: Guide">
-            ⌨ Shortcuts
+            Shortcuts
         </div>
     </div>
 
@@ -344,8 +346,8 @@
     <section id="guide-panel" class="guide-panel glass-panel hidden" role="dialog" aria-labelledby="guide-title" aria-modal="false">
         <div class="guide-header">
             <div>
-                <p class="guide-kicker">Hızlı kullanım rehberi</p>
-                <h2 id="guide-title">PlanX Urban Procedural 3D nasıl kullanılır?</h2>
+                <p class="guide-kicker">Quick start guide</p>
+                <h2 id="guide-title">How to use PlanX Urban Procedural 3D</h2>
             </div>
             <button id="btn-guide-close" class="guide-close" type="button" aria-label="Close guide">x</button>
         </div>
@@ -353,44 +355,43 @@
         <div class="guide-grid">
             <article class="guide-step">
                 <span class="guide-step-no">1</span>
-                <h3>QGIS katmanını hazırla</h3>
-                <p>Parsel, ada veya yapı adası sınırlarını içeren bir poligon vektör katmanı seç. Metre bazlı projeksiyon en doğru sonuçları verir.</p>
+                <h3>Prepare a QGIS layer</h3>
+                <p>Select a polygon vector layer that represents parcels, blocks, or development sites. A projected CRS in meters gives the most reliable distances and areas.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">2</span>
-                <h3>Eklentiyi çalıştır</h3>
-                <p>QGIS dialogunda katmanı seç, portu bırak ve Run düğmesine bas. Tarayıcıda bu 3D cockpit açılır.</p>
+                <h3>Launch the cockpit</h3>
+                <p>Choose the layer in the QGIS launcher, keep the suggested local port unless needed, and start the browser cockpit.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">3</span>
-                <h3>Bir parsel seç</h3>
-                <p>3D sahnede parselin üstüne tıkla. Sağ panelde imar parametreleri, kütle tipi ve TAKS/KAKS kontrolleri açılır.</p>
+                <h3>Select a parcel</h3>
+                <p>Click a parcel or generated building in the 3D scene. The right panel opens its controls, limits, and live performance metrics.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">4</span>
-                <h3>Tasarımı değiştir</h3>
-                <p>Kat adedi, çekme mesafesi, kat yüksekliği, kullanım türü, çatı tipi ve kütle tipolojisini ayarla. Sonuç sahnede anlık güncellenir.</p>
+                <h3>Tune the scenario</h3>
+                <p>Adjust setbacks, floors, floor height, use, roof style, and building typology. The massing model updates immediately in the scene.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">5</span>
-                <h3>Uygunluğu kontrol et</h3>
-                <p>Compliance Dashboard, BCR/TAKS, FAR/KAKS, yükseklik, nüfus ve sürdürülebilirlik metriklerini yeşil/kırmızı durumla gösterir.</p>
+                <h3>Check compliance</h3>
+                <p>The dashboard tracks BCR, FAR, height, population, open space, carbon, and runoff. Red states indicate a limit that needs attention.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">6</span>
-                <h3>QGIS'e geri yaz</h3>
-                <p>Sync Parameters to QGIS düğmesi seçili değişiklikleri katmana yazar. Gerekli PlanX alanları yoksa eklenti onları otomatik ekler.</p>
+                <h3>Write back to QGIS</h3>
+                <p>Use the Sync to QGIS action to store edited parameters, calculated metrics, and optional geometry changes back into the active layer.</p>
             </article>
         </div>
 
         <div class="guide-note">
-            <strong>İpuçları:</strong> Auto-Solve Selected Parcel seçili parseli sınırlar içinde iyileştirir. Auto-Solve City tüm parselleri optimize eder. R kamerayı sıfırlar, F seçili parsele odaklanır, N gece/gündüz değiştirir, G zemindeki grid'i açar.
+            <strong>Tips:</strong> Auto-Solve Selected Parcel optimizes the active parcel. Auto-Solve City optimizes all parcels. R resets the camera, F focuses the selected parcel, N toggles day/night lighting, and G toggles the ground grid.
         </div>
     </section>
 
-    <!-- Floating 3D Measurement Overlay Container -->
     <div id="measurement-overlay-container" style="position: absolute; top: 0; left: 0; pointer-events: none; z-index: 15; width: 100%; height: 100%; overflow: hidden;"></div>
- 
-    <script type="module" src="app.js?v=0.1.11"></script>
+
+    <script type="module" src="app.js?v=0.1.12"></script>
 </body>
 </html>
