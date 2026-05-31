@@ -552,3 +552,42 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .checkbox-container:hover {
     color: var(--text-primary);
 }
+
+/* Time control row and Play button */
+.time-control-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    width: 100%;
+    margin-top: 4px;
+}
+
+.play-button {
+    background: var(--accent);
+    color: white;
+    border: none;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    font-size: 0.85rem;
+    font-weight: bold;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s, transform 0.1s;
+}
+
+.play-button:hover {
+    background: var(--accent-hover);
+    transform: scale(1.05);
+}
+
+.play-button:active {
+    transform: scale(0.95);
+}
+
+.play-button.playing {
+    background: var(--danger);
+}
+

@@ -18,6 +18,10 @@ let pedestrians = []; // Array of { mesh, path, speed, progress, direction }
 // Traffic State
 let trafficCars = []; // Array of { carMesh, roadRing, speed, progress }
 
+// Time Animation State
+let isTimeAnimating = false;
+let timeAnimationId = null;
+
 // Light references
 let dirLight, ambientLight;
 
@@ -54,6 +58,7 @@ const inMaxBcr = document.getElementById('input-max-bcr');
 const inMaxFar = document.getElementById('input-max-far');
 const inMaxHeight = document.getElementById('input-max-height');
 const inTime = document.getElementById('input-time');
+const btnPlayTime = document.getElementById('btn-play-time');
 
 // Label values
 const lblSetback = document.getElementById('val-setback');
@@ -361,9 +366,12 @@ function setupInputListeners() {
     };
 
     const triggerTimeUpdate = () => {
+        if (isTimeAnimating) {
+            toggleTimeAnimation(); // Stop playing if user manually drags slider
+        }
         const tVal = parseFloat(inTime.value);
         const hours = Math.floor(tVal);
-        const mins = (tVal % 1) === 0 ? "00" : "30";
+        const mins = Math.floor((tVal % 1) * 60).toString().padStart(2, '0');
         lblTime.textContent = `${hours}:${mins}`;
 
         updateSolarPhysics(tVal);
@@ -383,6 +391,11 @@ function setupInputListeners() {
 
     // Time-of-day slider
     inTime.addEventListener('input', triggerTimeUpdate);
+
+    // Play Solar animation button
+    if (btnPlayTime) {
+        btnPlayTime.addEventListener('click', toggleTimeAnimation);
+    }
 
     btnSync.addEventListener('click', syncToQGIS);
     btnCapture.addEventListener('click', captureViewport);
@@ -2885,4 +2898,41 @@ function setBuildingHoverHighlight(meshOrGroup, isHovered) {
             }
         }
     });
+}
+
+function toggleTimeAnimation() {
+    isTimeAnimating = !isTimeAnimating;
+    if (isTimeAnimating) {
+        btnPlayTime.textContent = "⏸"; // Pause icon
+        btnPlayTime.title = "Pause Shadow Animation";
+        btnPlayTime.classList.add('playing');
+        animateTime();
+    } else {
+        btnPlayTime.textContent = "▶"; // Play icon
+        btnPlayTime.title = "Animate Solar Shadows";
+        btnPlayTime.classList.remove('playing');
+        if (timeAnimationId) {
+            cancelAnimationFrame(timeAnimationId);
+            timeAnimationId = null;
+        }
+    }
+}
+
+function animateTime() {
+    if (!isTimeAnimating) return;
+
+    let tVal = parseFloat(inTime.value);
+    tVal += 0.05; // speed of shadow animation
+    if (tVal > 22.0) {
+        tVal = 6.0; // loop back to morning
+    }
+    
+    inTime.value = tVal.toFixed(2);
+    
+    const hours = Math.floor(tVal);
+    const mins = Math.floor((tVal % 1) * 60).toString().padStart(2, '0');
+    lblTime.textContent = `${hours}:${mins}`;
+    updateSolarPhysics(tVal);
+
+    timeAnimationId = requestAnimationFrame(animateTime);
 }

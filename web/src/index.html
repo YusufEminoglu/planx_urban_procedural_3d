@@ -48,7 +48,7 @@
             if (loading) loading.style.display = 'none';
         };
     </script>
-    <link rel="stylesheet" href="style.css?v=0.2.8">
+    <link rel="stylesheet" href="style.css?v=0.2.9">
     <script type="importmap">
         {
             "imports": {
@@ -156,9 +156,11 @@
             </div>
 
             <div class="control-group">
-                <label>Solar Time: <span id="val-time">12:00</span>
-                    <input type="range" id="input-time" min="6.0" max="22.0" step="0.5" value="12.0">
-                </label>
+                <label>Solar Time: <span id="val-time">12:00</span></label>
+                <div class="time-control-row">
+                    <input type="range" id="input-time" min="6.0" max="22.0" step="0.1" value="12.0" style="flex: 1; margin: 0;">
+                    <button id="btn-play-time" class="play-button" title="Animate Solar Shadows">▶</button>
+                </div>
             </div>
 
             <hr class="divider">
@@ -299,6 +301,6 @@
         </div>
     </div>
 
-    <script type="module" src="app.js?v=0.2.8"></script>
+    <script type="module" src="app.js?v=0.2.9"></script>
 </body>
 </html>
