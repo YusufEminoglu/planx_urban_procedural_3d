@@ -48,7 +48,7 @@
             if (loading) loading.style.display = 'none';
         };
     </script>
-    <link rel="stylesheet" href="style.css?v=0.4.0">
+    <link rel="stylesheet" href="style.css?v=0.1.10">
     <script type="importmap">
         {
             "imports": {
@@ -69,7 +69,7 @@
         <div class="spinner"></div>
         <h2>PlanX Urban Procedural 3D</h2>
         <p id="loading-text">Loading layer features from QGIS...</p>
-        <div class="version-badge">v0.4.0 — Procedural Engine</div>
+        <div class="version-badge">v0.1.10 — Procedural Engine</div>
     </div>
 
     <!-- 3D Canvas Viewport -->
@@ -145,10 +145,10 @@
             <div class="control-group">
                 <label>Roof Style
                     <select id="input-roof-style">
-                        <option value="Flat">Flat (with Helipad & HVAC)</option>
                         <option value="Hipped">Hipped (Clay Tiles)</option>
                         <option value="Gable">Gable (Classic Slanted)</option>
                         <option value="Mansard">Mansard (French Slate)</option>
+                        <option value="Flat">Flat (with Helipad & HVAC)</option>
                     </select>
                 </label>
             </div>
@@ -214,7 +214,7 @@
                     Show Buildings
                 </label>
                 <label class="checkbox-container">
-                    <input type="checkbox" id="toggle-zoning" checked>
+                    <input type="checkbox" id="toggle-zoning">
                     Show Zoning Envelopes
                 </label>
                 <label class="checkbox-container">
@@ -234,7 +234,7 @@
                     Show Traffic Cars
                 </label>
                 <label class="checkbox-container">
-                    <input type="checkbox" id="toggle-grid" checked>
+                    <input type="checkbox" id="toggle-grid">
                     Show Ground Grid
                 </label>
             </div>
@@ -341,6 +341,6 @@
     <!-- Floating 3D Measurement Overlay Container -->
     <div id="measurement-overlay-container" style="position: absolute; top: 0; left: 0; pointer-events: none; z-index: 15; width: 100%; height: 100%; overflow: hidden;"></div>
  
-    <script type="module" src="app.js?v=0.4.0"></script>
+    <script type="module" src="app.js?v=0.1.10"></script>
 </body>
 </html>

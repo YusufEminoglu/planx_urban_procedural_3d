@@ -16,7 +16,9 @@ let skyUniforms = null;
 let pedestrians = []; // Array of { mesh, path, speed, progress, direction }
 
 // Traffic State
-let trafficCars = []; // Array of { carMesh, roadRing, speed, progress }
+let trafficCars = []; // Array of { carMesh, path, speed, progress, laneOffset }
+let roadMeshes = []; // Inferred road corridor surfaces/markings between urban blocks
+let intersectionMeshes = []; // Roundabouts, crossings, and signal hardware at inferred junctions
 
 // Time Animation State
 let isTimeAnimating = false;
@@ -49,6 +51,11 @@ let dirLight, ambientLight;
 // Projection variables (local offset)
 let centerX = 0;
 let centerY = 0;
+let groundMesh = null;
+let groundTexture = null;
+
+const LARGE_EXTENT_FOCUS_THRESHOLD = 1200;
+const DEFAULT_CAMERA_DISTANCE = 320;
 
 // Setup UI Element references
 const loadingEl = document.getElementById('loading');
@@ -141,6 +148,7 @@ let gridHelper = null;
 function init() {
     // 1. Scene setup
     scene = new THREE.Scene();
+    scene.background = new THREE.Color(0xc7e7ff);
 
     // 2. Sky Gradient Dome — procedural shader sphere replacing flat background
     const skyGeom = new THREE.SphereGeometry(2000, 32, 32);
@@ -181,8 +189,8 @@ function init() {
         }
     `;
     skyUniforms = {
-        uHorizonColor: { value: new THREE.Color(0x0a0e27) },
-        uZenithColor:  { value: new THREE.Color(0x020617) },
+        uHorizonColor: { value: new THREE.Color(0xdaf5ff) },
+        uZenithColor:  { value: new THREE.Color(0x63b3ed) },
         uStarIntensity: { value: 0.0 }
     };
     const skyMat = new THREE.ShaderMaterial({
@@ -203,10 +211,11 @@ function init() {
     renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setClearColor(0xc7e7ff, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
+    renderer.toneMappingExposure = 1.18;
     document.getElementById('viewport').appendChild(renderer.domElement);
 
     // 5. Post-Processing Bloom
@@ -236,10 +245,10 @@ function init() {
     });
 
     // 7. Lighting
-    ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
+    ambientLight = new THREE.AmbientLight(0xffffff, 0.9);
     scene.add(ambientLight);
 
-    dirLight = new THREE.DirectionalLight(0xffffff, 0.85);
+    dirLight = new THREE.DirectionalLight(0xffffff, 1.15);
     dirLight.position.set(200, 450, 150);
     dirLight.castShadow = true;
     dirLight.shadow.mapSize.width = 2048;
@@ -259,10 +268,10 @@ function init() {
     groundCanvas.width = 512;
     groundCanvas.height = 512;
     const gCtx = groundCanvas.getContext('2d');
-    gCtx.fillStyle = '#0f1520';
+    gCtx.fillStyle = '#7f8fa3';
     gCtx.fillRect(0, 0, 512, 512);
     // Draw subtle grid lines — each cell ≈ 10m  (512px / 24 cells ≈ 21px per cell)
-    gCtx.strokeStyle = 'rgba(30, 41, 59, 0.35)';
+    gCtx.strokeStyle = 'rgba(15, 23, 42, 0.04)';
     gCtx.lineWidth = 0.5;
     const cellSize = 512 / 24;
     for (let i = 0; i <= 24; i++) {
@@ -270,34 +279,35 @@ function init() {
         gCtx.beginPath(); gCtx.moveTo(p, 0); gCtx.lineTo(p, 512); gCtx.stroke();
         gCtx.beginPath(); gCtx.moveTo(0, p); gCtx.lineTo(512, p); gCtx.stroke();
     }
-    const groundTex = new THREE.CanvasTexture(groundCanvas);
-    groundTex.wrapS = THREE.RepeatWrapping;
-    groundTex.wrapT = THREE.RepeatWrapping;
-    groundTex.repeat.set(10, 10);
+    groundTexture = new THREE.CanvasTexture(groundCanvas);
+    groundTexture.wrapS = THREE.RepeatWrapping;
+    groundTexture.wrapT = THREE.RepeatWrapping;
+    groundTexture.repeat.set(10, 10);
 
     const groundGeom = new THREE.PlaneGeometry(2400, 2400);
     groundGeom.rotateX(-Math.PI / 2);
     const groundMat = new THREE.MeshStandardMaterial({
-        map: groundTex,
-        color: 0x111827,
+        map: groundTexture,
+        color: 0xd7e2ee,
         roughness: 0.95,
         metalness: 0.05
     });
-    const groundMesh = new THREE.Mesh(groundGeom, groundMat);
+    groundMesh = new THREE.Mesh(groundGeom, groundMat);
     groundMesh.receiveShadow = true;
     groundMesh.position.y = -0.1;
     scene.add(groundMesh);
 
     // Subtle overlay grid (kept for fine detail but semi-transparent)
-    const grid = new THREE.GridHelper(1200, 120, 0x1e293b, 0x0f172a);
+    const grid = new THREE.GridHelper(1200, 120, 0xb6c6d8, 0x7a8ba1);
     grid.position.y = -0.05;
-    grid.material.opacity = 0.4;
+    grid.material.opacity = 0.18;
     grid.material.transparent = true;
+    grid.visible = toggleGridEl ? toggleGridEl.checked : false;
     scene.add(grid);
     gridHelper = grid;
 
-    // 9. Atmospheric Fog
-    scene.fog = new THREE.FogExp2(0x0a0e17, 0.0012);
+    // 9. Clear city air: no fog by default.
+    scene.fog = null;
 
     // Build Solar Orbit Arc
     const arcPoints = [];
@@ -329,6 +339,8 @@ function init() {
     const sunSphere = new THREE.Mesh(sunSphereGeom, sunSphereMat);
     scene.add(sunSphere);
     window.sunSphere = sunSphere;
+
+    updateSolarPhysics(parseFloat(inTime.value || "12"));
 
     // 10. Interaction
     raycaster = new THREE.Raycaster();
@@ -605,19 +617,18 @@ function updateSolarPhysics(timeVal) {
     // Update sky dome gradient and stars
     if (skyUniforms) {
         if (isNight) {
+            scene.background = new THREE.Color(0x020617);
+            if (renderer) renderer.setClearColor(0x020617, 1);
             skyUniforms.uHorizonColor.value.setHex(0x020208);
             skyUniforms.uZenithColor.value.setHex(0x000005);
             skyUniforms.uStarIntensity.value = 0.9;
         } else {
-            skyUniforms.uHorizonColor.value.setHex(0xbae6fd); // Bright sky blue horizon
-            skyUniforms.uZenithColor.value.setHex(0x0ea5e9);  // Rich sky blue zenith
+            scene.background = new THREE.Color(0xc7e7ff);
+            if (renderer) renderer.setClearColor(0xc7e7ff, 1);
+            skyUniforms.uHorizonColor.value.setHex(0xdaf5ff); // clear day horizon
+            skyUniforms.uZenithColor.value.setHex(0x63b3ed);  // rich but readable sky
             skyUniforms.uStarIntensity.value = 0.0;
         }
-    }
-
-    // Update atmospheric fog color to match sky
-    if (scene.fog) {
-        scene.fog.color.setHex(isNight ? 0x020208 : 0xf1f5f9); // Clean slate-100 day mist
     }
 
     if (isNight) {
@@ -627,11 +638,11 @@ function updateSolarPhysics(timeVal) {
     } else {
         // Daylight Mode
         ambientLight.color.setHex(0xffffff);
-        ambientLight.intensity = 0.75; // Ambient light increased for high-fidelity visibility
+        ambientLight.intensity = 0.95; // bright first-view city readability
         
         // Solar intensity peaks at noon
         const peakFactor = Math.sin(angle);
-        dirLight.intensity = 0.5 + peakFactor * 0.6; // High intensity sun rays
+        dirLight.intensity = 0.75 + peakFactor * 0.65; // High intensity sun rays
     }
 
     // Update active building emission light and streetlights visibility
@@ -668,6 +679,46 @@ function updateSolarPhysics(timeVal) {
     });
 }
 
+function defaultTypologyForBlock(area, usage = 'Residential', ring = null) {
+    if (usage === 'Park') return 'Tower';
+    let aspect = 1;
+    if (ring && ring.length >= 3) {
+        const ob = getOrientedBounds(ring);
+        const minDim = Math.max(1, Math.min(ob.W, ob.H));
+        const maxDim = Math.max(ob.W, ob.H);
+        aspect = maxDim / minDim;
+    }
+    if (area >= 1800) return 'MultiBuildingBlock';
+    if (area >= 1100) return aspect > 2.0 ? 'Slab' : 'Courtyard';
+    if (area >= 650) return aspect > 1.8 ? 'Slab' : 'LShape';
+    return 'Tower';
+}
+
+function defaultFloorCountForBlock(area, usage = 'Residential') {
+    if (usage === 'Park') return 1;
+    if (usage === 'Commercial') return area >= 1600 ? 8 : 6;
+    if (usage === 'MixedUse') return area >= 1800 ? 7 : 5;
+    if (usage === 'Civic') return 4;
+    if (area >= 2400) return 6;
+    if (area >= 1200) return 5;
+    return 4;
+}
+
+function defaultRoofStyleFor(usage = 'Residential', typology = 'Tower') {
+    if (usage === 'Park') return 'Hipped';
+    if (typology === 'Slab') return 'Gable';
+    if (typology === 'Courtyard' || typology === 'LShape' || typology === 'UShape') return 'Hipped';
+    if (typology === 'PodiumTower' || typology === 'SteppedTower' || typology === 'MultiBuildingBlock') return 'Mansard';
+    if (usage === 'Commercial' || usage === 'MixedUse') return 'Mansard';
+    if (usage === 'Civic') return 'Gable';
+    return 'Hipped';
+}
+
+function roofStyleForItem(item) {
+    const params = item.params || {};
+    return params.roofStyle || defaultRoofStyleFor(params.usage, params.typology);
+}
+
 // Mockup GeoJSON for Offline Demo Mode
 const mockupGeoJSON = {
     type: "FeatureCollection",
@@ -686,9 +737,9 @@ const mockupGeoJSON = {
                 setback: 3.0,
                 floors: 6,
                 floor_h: 3.2,
-                typology: "SteppedTower",
+                typology: "MultiBuildingBlock",
                 usage: "MixedUse",
-                roof_style: "Flat",
+                roof_style: "Mansard",
                 stepback_i: 3,
                 stepback_d: 1.5,
                 max_bcr: 0.5,
@@ -742,7 +793,7 @@ const mockupGeoJSON = {
                 floor_h: 3.5,
                 typology: "Tower",
                 usage: "Park",
-                roof_style: "Flat",
+                roof_style: "Hipped",
                 max_bcr: 0.1,
                 max_far: 0.1,
                 max_height: 4.0
@@ -766,9 +817,9 @@ const mockupGeoJSON = {
                 setback: 3.0,
                 floors: 10,
                 floor_h: 3.0,
-                typology: "Tower",
+                typology: "PodiumTower",
                 usage: "Commercial",
-                roof_style: "Flat",
+                roof_style: "Mansard",
                 max_bcr: 0.6,
                 max_far: 5.0,
                 max_height: 35.0
@@ -801,34 +852,283 @@ async function loadGeoJSON() {
     } catch (e) {
         console.warn("Could not reach QGIS server, falling back to Demo Mockup layer.", e);
         
-        // Load mock dataset
-        parseGeoJSON(mockupGeoJSON);
-        
-        // Show offline warning banner after parseGeoJSON to prevent it from hiding it
-        if (crsWarningBannerEl) {
-            crsWarningBannerEl.className = 'warning-banner';
-            crsWarningBannerEl.style.background = 'linear-gradient(135deg, #d97706, #b45309)';
-            crsWarningBannerEl.classList.remove('hidden');
-            const warningText = crsWarningBannerEl.querySelector('.warning-text');
-            if (warningText) {
-                warningText.innerHTML = '<strong>Offline Demo Mode:</strong> Loaded procedural mockup parcels. Start the plugin server in QGIS to connect live.';
-            }
-        }
+        showFallbackScene('Offline Demo Mode: Loaded procedural mockup parcels. Start the plugin server in QGIS to connect live.');
         
         loadingEl.style.opacity = 0;
         setTimeout(() => loadingEl.classList.add('hidden'), 500);
     }
 }
 
+function showDataWarning(message, tone = 'warning') {
+    if (!crsWarningBannerEl) return;
+    crsWarningBannerEl.className = 'warning-banner';
+    crsWarningBannerEl.style.background = tone === 'error'
+        ? 'linear-gradient(135deg, #dc2626, #991b1b)'
+        : 'linear-gradient(135deg, #d97706, #b45309)';
+    crsWarningBannerEl.classList.remove('hidden');
+    const warningText = crsWarningBannerEl.querySelector('.warning-text');
+    if (warningText) {
+        warningText.innerHTML = `<strong>${message}</strong>`;
+    }
+}
+
+function showFallbackScene(reason) {
+    console.warn(`PlanX fallback city loaded: ${reason}`);
+    parseGeoJSON(mockupGeoJSON, { allowFallback: false, fallbackReason: reason });
+    showDataWarning(reason);
+    if (window.planxDebug) {
+        window.planxDebug.fallbackReason = reason;
+    }
+    return false;
+}
+
+function normalizePlanRing(points) {
+    const clean = [];
+    points.forEach(pt => {
+        if (!Number.isFinite(pt.x) || !Number.isFinite(pt.y)) return;
+        const prev = clean[clean.length - 1];
+        if (!prev || Math.hypot(pt.x - prev.x, pt.y - prev.y) > 0.001) {
+            clean.push(pt);
+        }
+    });
+
+    if (clean.length > 2) {
+        const first = clean[0];
+        const last = clean[clean.length - 1];
+        if (Math.hypot(first.x - last.x, first.y - last.y) <= 0.001) {
+            clean.pop();
+        }
+    }
+    return clean;
+}
+
+function buildFeatureMeshesSafely(item) {
+    try {
+        buildParcelGround(item);
+        buildSidewalk(item);
+        rebuildParcel3D(item);
+        return;
+    } catch (err) {
+        console.error("PlanX feature build failed; retrying with safe tower fallback.", item.fid, err);
+    }
+
+    try {
+        item.params.typology = 'Tower';
+        item.params.roofStyle = 'Flat';
+        item.params.setback = Math.min(item.params.setback || 3.0, 2.0);
+        if (!item.parcelMesh) buildParcelGround(item);
+        rebuildParcel3D(item);
+    } catch (fallbackErr) {
+        console.error("PlanX fallback build failed; keeping parcel ground only.", item.fid, fallbackErr);
+    }
+}
+
+function extractOuterRingCoordinates(feature) {
+    if (!feature || !feature.geometry) return null;
+    const geometry = feature.geometry;
+
+    if (geometry.type === 'Polygon') {
+        return Array.isArray(geometry.coordinates) ? geometry.coordinates[0] : null;
+    }
+
+    if (geometry.type === 'MultiPolygon' && Array.isArray(geometry.coordinates)) {
+        let bestRing = null;
+        let bestArea = 0;
+        geometry.coordinates.forEach(poly => {
+            const ring = poly && poly[0];
+            if (!Array.isArray(ring) || ring.length < 4) return;
+            const area = Math.abs(calculatePolygonArea(ring.map(coord => ({
+                x: Array.isArray(coord) ? Number(coord[0]) : NaN,
+                y: Array.isArray(coord) ? Number(coord[1]) : NaN
+            }))));
+            if (area > bestArea) {
+                bestArea = area;
+                bestRing = ring;
+            }
+        });
+        return bestRing;
+    }
+
+    return null;
+}
+
+function collectRenderableFeatures(data) {
+    if (!data || !Array.isArray(data.features)) return [];
+
+    return data.features
+        .map((feature, index) => {
+            const coords = extractOuterRingCoordinates(feature);
+            if (!Array.isArray(coords) || coords.length < 4) return null;
+
+            const cleanCoords = coords
+                .map(coord => Array.isArray(coord) ? [Number(coord[0]), Number(coord[1])] : [NaN, NaN])
+                .filter(coord => Number.isFinite(coord[0]) && Number.isFinite(coord[1]));
+
+            if (cleanCoords.length < 4) return null;
+            return { feature, index, coords: cleanCoords };
+        })
+        .filter(Boolean);
+}
+
+function calculateCoordinateBounds(renderableFeatures) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+
+    renderableFeatures.forEach(entry => {
+        entry.coords.forEach(coord => {
+            minX = Math.min(minX, coord[0]);
+            maxX = Math.max(maxX, coord[0]);
+            minY = Math.min(minY, coord[1]);
+            maxY = Math.max(maxY, coord[1]);
+        });
+    });
+
+    if (![minX, maxX, minY, maxY].every(Number.isFinite)) return null;
+    if (Math.abs(maxX - minX) < 0.001 || Math.abs(maxY - minY) < 0.001) return null;
+
+    return { minX, maxX, minY, maxY };
+}
+
+function getRingBounds(ring) {
+    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
+    ring.forEach(pt => {
+        minX = Math.min(minX, pt.x);
+        maxX = Math.max(maxX, pt.x);
+        minY = Math.min(minY, pt.y);
+        maxY = Math.max(maxY, pt.y);
+    });
+    return {
+        minX,
+        maxX,
+        minY,
+        maxY,
+        width: maxX - minX,
+        depth: maxY - minY,
+        cx: (minX + maxX) / 2,
+        cy: (minY + maxY) / 2
+    };
+}
+
+function resizeGroundForCity(maxDim) {
+    const groundSize = Math.max(2400, Math.min(80000, maxDim * 2.4));
+    if (groundMesh) {
+        const scale = groundSize / 2400;
+        groundMesh.scale.set(scale, 1, scale);
+    }
+    if (groundTexture) {
+        const repeats = Math.max(10, groundSize / 240);
+        groundTexture.repeat.set(repeats, repeats);
+        groundTexture.needsUpdate = true;
+    }
+    if (gridHelper) {
+        const gridScale = groundSize / 1200;
+        gridHelper.scale.set(gridScale, 1, gridScale);
+    }
+}
+
+function chooseCameraFocus(maxDim) {
+    if (parcelFeatures.length === 0) {
+        return {
+            target: new THREE.Vector3(0, 0, 0),
+            focusDim: DEFAULT_CAMERA_DISTANCE
+        };
+    }
+
+    if (maxDim <= LARGE_EXTENT_FOCUS_THRESHOLD) {
+        return {
+            target: new THREE.Vector3(0, 0, 0),
+            focusDim: Math.max(160, maxDim)
+        };
+    }
+
+    const focusItem = parcelFeatures
+        .slice()
+        .sort((a, b) => {
+            const ba = getRingBounds(a.outerRing);
+            const bb = getRingBounds(b.outerRing);
+            const da = Math.hypot(ba.cx, ba.cy);
+            const db = Math.hypot(bb.cx, bb.cy);
+            return da - db || b.area - a.area;
+        })[0];
+    const bounds = getRingBounds(focusItem.outerRing);
+    return {
+        target: new THREE.Vector3(bounds.cx, 0, -bounds.cy),
+        focusDim: Math.max(120, bounds.width, bounds.depth)
+    };
+}
+
+function fitCameraToCity(bounds) {
+    const maxDim = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, 1);
+    const focus = chooseCameraFocus(maxDim);
+    const focusDim = Math.max(120, focus.focusDim);
+    const distance = Math.max(220, Math.min(Math.max(focusDim * 2.4, DEFAULT_CAMERA_DISTANCE), 1800));
+
+    camera.near = 0.5;
+    camera.far = Math.max(10000, maxDim * 5, distance * 8);
+    camera.updateProjectionMatrix();
+    camera.position.set(
+        focus.target.x + distance * 0.55,
+        distance * 0.62,
+        focus.target.z + distance * 0.95
+    );
+
+    controls.target.copy(focus.target);
+    controls.maxDistance = Math.max(2000, maxDim * 3);
+    controls.update();
+
+    resizeGroundForCity(maxDim);
+
+    if (dirLight) {
+        dirLight.position.set(focus.target.x + 200, Math.max(450, distance * 1.5), focus.target.z + 150);
+        dirLight.shadow.camera.far = Math.max(1200, maxDim * 3, distance * 4);
+        const shadowExtent = Math.max(600, Math.min(5000, Math.max(maxDim, focusDim) * 1.2));
+        dirLight.shadow.camera.left = -shadowExtent;
+        dirLight.shadow.camera.right = shadowExtent;
+        dirLight.shadow.camera.top = shadowExtent;
+        dirLight.shadow.camera.bottom = -shadowExtent;
+        dirLight.shadow.camera.updateProjectionMatrix();
+    }
+
+    return { maxDim, focusDim, distance };
+}
+
+function updateSceneDebug(bounds, fallbackReason = null) {
+    const buildingCount = parcelFeatures.filter(item => !!item.buildingMesh).length;
+    const parcelGroundCount = parcelFeatures.filter(item => !!item.parcelMesh).length;
+    window.planxDebug = {
+        ...(window.planxDebug || {}),
+        parcelFeatures: parcelFeatures.length,
+        parcelGroundCount,
+        buildingCount,
+        roadMeshes: roadMeshes.length,
+        intersectionMeshes: intersectionMeshes.length,
+        trafficCars: trafficCars.length,
+        bounds,
+        camera: {
+            position: camera ? camera.position.toArray() : null,
+            target: controls ? controls.target.toArray() : null,
+            far: camera ? camera.far : null
+        },
+        fallbackReason
+    };
+}
+
 // Parse GeoJSON geometries and center coordinates
-function parseGeoJSON(data) {
-    if (!data.features || data.features.length === 0) {
+function parseGeoJSON(data, options = {}) {
+    const allowFallback = options.allowFallback !== false;
+    const renderableFeatures = collectRenderableFeatures(data);
+    const bounds = calculateCoordinateBounds(renderableFeatures);
+
+    if (renderableFeatures.length === 0 || !bounds) {
+        if (allowFallback) {
+            return showFallbackScene('QGIS returned no renderable polygon features, so a demo city was loaded instead of a blank grid.');
+        }
         clearScene();
         hudTotalParcels.textContent = "0";
         if (placeholderEl) {
             placeholderEl.innerHTML = "<strong>No features found in the active layer.</strong><br><br>Please draw polygon features (parcels/building blocks) in QGIS first, then click <strong>Reload Data from QGIS</strong>.";
         }
-        return;
+        updateSceneDebug(null, options.fallbackReason || 'No renderable polygon features');
+        return false;
     }
 
     // Clear existing scene elements and memory/resources
@@ -849,7 +1149,7 @@ function parseGeoJSON(data) {
         }
     }
 
-    hudTotalParcels.textContent = data.features.length;
+    hudTotalParcels.textContent = renderableFeatures.length;
     if (data.crs && data.crs.properties && data.crs.properties.name) {
         const crsName = data.crs.properties.name.split("::").pop();
         if (hudCrs) {
@@ -857,56 +1157,36 @@ function parseGeoJSON(data) {
         }
     }
 
-    // 1. Calculate bounding box center
-    let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
-    data.features.forEach(f => {
-        if (!f.geometry || (f.geometry.type !== 'Polygon' && f.geometry.type !== 'MultiPolygon')) return;
-        
-        const rings = f.geometry.type === 'Polygon' ? [f.geometry.coordinates] : f.geometry.coordinates;
-        rings.forEach(ring => {
-            ring[0].forEach(coord => {
-                if (coord[0] < minX) minX = coord[0];
-                if (coord[0] > maxX) maxX = coord[0];
-                if (coord[1] < minY) minY = coord[1];
-                if (coord[1] > maxY) maxY = coord[1];
-            });
-        });
-    });
-
-    centerX = (minX + maxX) / 2;
-    centerY = (minY + maxY) / 2;
+    centerX = (bounds.minX + bounds.maxX) / 2;
+    centerY = (bounds.minY + bounds.maxY) / 2;
 
     // 2. Parse features
-    data.features.forEach((f, idx) => {
-        if (!f.geometry) return;
-        const fid = f.id !== undefined ? f.id : idx;
+    renderableFeatures.forEach(entry => {
+        const f = entry.feature;
+        const fid = f.id !== undefined ? f.id : entry.index;
         const props = f.properties || {};
 
-        let coords = [];
-        if (f.geometry.type === 'Polygon') {
-            coords = f.geometry.coordinates[0];
-        } else if (f.geometry.type === 'MultiPolygon') {
-            coords = f.geometry.coordinates[0][0];
-        }
-
-        if (!coords || coords.length < 3) return;
-
         // Convert coordinates to local meters
-        const localPoints = coords.map(pt => {
+        const localPoints = normalizePlanRing(entry.coords.map(pt => {
             return { x: pt[0] - centerX, y: pt[1] - centerY };
-        });
+        }));
+
+        if (localPoints.length < 3) return;
 
         // Calculate parcel area
         const area = calculatePolygonArea(localPoints);
+        if (!Number.isFinite(area) || area <= 0.01) return;
+        const usage = props.usage !== undefined ? props.usage : 'Residential';
+        const typology = props.typology !== undefined ? props.typology : defaultTypologyForBlock(area, usage, localPoints);
 
         // Initial params (fall back to layer attributes if existing)
         const params = {
             setback: props.setback !== undefined ? parseFloat(props.setback) : 3.0,
-            floors: props.floors !== undefined ? parseInt(props.floors) : 4,
+            floors: props.floors !== undefined ? parseInt(props.floors) : defaultFloorCountForBlock(area, usage),
             floorHeight: props.floor_h !== undefined ? parseFloat(props.floor_h) : (props.floor_height !== undefined ? parseFloat(props.floor_height) : 3.0),
-            typology: props.typology !== undefined ? props.typology : 'Tower',
-            usage: props.usage !== undefined ? props.usage : 'Residential',
-            roofStyle: props.roof_style !== undefined ? props.roof_style : (props.usage === 'Residential' ? 'Hipped' : 'Flat'),
+            typology,
+            usage,
+            roofStyle: props.roof_style !== undefined ? props.roof_style : defaultRoofStyleFor(usage, typology),
             stepbackInterval: props.stepback_i !== undefined ? parseInt(props.stepback_i) : 4,
             stepbackDepth: props.stepback_d !== undefined ? parseFloat(props.stepback_d) : 1.5,
             // Zoning constraints
@@ -929,35 +1209,43 @@ function parseGeoJSON(data) {
             zoningMesh: null
         };
 
-        buildParcelGround(item);
-        buildSidewalk(item);
-        rebuildParcel3D(item);
-        
         parcelFeatures.push(item);
+        buildFeatureMeshesSafely(item);
     });
 
-    // Generate Animated Traffic on road tracks
-    generateTrafficCars();
+    if (parcelFeatures.length === 0) {
+        if (allowFallback) {
+            return showFallbackScene('QGIS polygons could not be converted into valid 3D footprints, so a demo city was loaded instead of a blank grid.');
+        }
+        updateSceneDebug(bounds, options.fallbackReason || 'No valid footprints after parsing');
+        return false;
+    }
 
-    // Zoom camera to fit parcels bounds
-    const maxDim = Math.max(maxX - minX, maxY - minY);
-    camera.position.set(0, maxDim * 0.8, maxDim * 1.2);
-    controls.target.set(0, 0, 0);
-    controls.update();
+    // Generate Animated Traffic on road tracks
+    try {
+        generateTrafficCars();
+    } catch (err) {
+        console.error("PlanX traffic/intersection generation failed; keeping buildings visible.", err);
+        window.planxDebug = { roadCorridors: [], intersections: [], trafficCars: 0, trafficError: String(err) };
+    }
+
+    const fit = fitCameraToCity(bounds);
+    updateSceneDebug({ ...bounds, maxDim: fit.maxDim, focusDim: fit.focusDim }, options.fallbackReason || null);
+    return true;
 }
 
 // Dynamic color updates for parcel grounds representing zoning compliance
 function updateParcelGroundColor(item, hasViolation) {
     if (!item.parcelMesh || !item.parcelMesh.material) return;
     
-    let colorHex = 0x1e293b; // default unselected compliant slate grey
+    let colorHex = 0x334155; // default unselected compliant slate grey
     
     if (item.params.usage === 'Park') {
         colorHex = 0x064e3b; // soft forest green for public parks
     } else if (selectedParcel === item) {
         colorHex = hasViolation ? 0xb91c1c : 0x0d9488; // active selection: bright red vs bright teal
     } else {
-        colorHex = hasViolation ? 0x450a0a : 0x1e293b; // inactive: dark burgundy vs default slate
+        colorHex = hasViolation ? 0x7f1d1d : 0x334155; // inactive: burgundy vs default slate
     }
     
     item.parcelMesh.material.color.setHex(colorHex);
@@ -975,7 +1263,7 @@ function buildParcelGround(item) {
     geom.rotateX(-Math.PI / 2);
 
     const mat = new THREE.MeshStandardMaterial({
-        color: 0x1e293b,
+        color: 0x334155,
         roughness: 0.9,
         polygonOffset: true,
         polygonOffsetFactor: 1,
@@ -1274,7 +1562,6 @@ function rebuildParcel3D(item) {
         }
         bldGeom = new THREE.ExtrudeGeometry(bldShape, { depth: height, bevelEnabled: false });
         bldGeom.rotateX(-Math.PI / 2);
-        bldGeom.translate(0, height, 0);
 
         footprintPoints = insetRing; // approximate pitched roof edge
     } else if (typology === 'Slab') {
@@ -1284,7 +1571,6 @@ function rebuildParcel3D(item) {
 
         bldGeom = new THREE.ExtrudeGeometry(slabShape, { depth: height, bevelEnabled: false });
         bldGeom.rotateX(-Math.PI / 2);
-        bldGeom.translate(0, height, 0);
 
         footprintPoints = slabShape.getPoints().map(pt => { return { x: pt.x, y: pt.y }; });
     } else if (typology === 'LShape') {
@@ -1294,7 +1580,6 @@ function rebuildParcel3D(item) {
 
         bldGeom = new THREE.ExtrudeGeometry(lShape, { depth: height, bevelEnabled: false });
         bldGeom.rotateX(-Math.PI / 2);
-        bldGeom.translate(0, height, 0);
 
         footprintPoints = lShape.getPoints().map(pt => { return { x: pt.x, y: pt.y }; });
     } else if (typology === 'UShape') {
@@ -1304,7 +1589,6 @@ function rebuildParcel3D(item) {
 
         bldGeom = new THREE.ExtrudeGeometry(uShape, { depth: height, bevelEnabled: false });
         bldGeom.rotateX(-Math.PI / 2);
-        bldGeom.translate(0, height, 0);
 
         footprintPoints = uShape.getPoints().map(pt => { return { x: pt.x, y: pt.y }; });
     } else if (typology === 'PodiumTower') {
@@ -1329,7 +1613,6 @@ function rebuildParcel3D(item) {
         });
         const podiumGeom = new THREE.ExtrudeGeometry(podiumShape, { depth: podiumH, bevelEnabled: false });
         podiumGeom.rotateX(-Math.PI / 2);
-        podiumGeom.translate(0, podiumH, 0);
 
         const matsPodium = getBuildingMaterials(usage, podiumFloors);
         const podiumMesh = new THREE.Mesh(podiumGeom, matsPodium);
@@ -1346,7 +1629,7 @@ function rebuildParcel3D(item) {
             });
             const towerGeom = new THREE.ExtrudeGeometry(towerShape, { depth: towerH, bevelEnabled: false });
             towerGeom.rotateX(-Math.PI / 2);
-            towerGeom.translate(0, height, 0);
+            towerGeom.translate(0, podiumH, 0);
 
             const matsTower = getBuildingMaterials(usage, towerFloors);
             towerMesh = new THREE.Mesh(towerGeom, matsTower);
@@ -1362,7 +1645,7 @@ function rebuildParcel3D(item) {
 
         // Add roof details on top based on roof style selection
         const topMesh = towerMesh || podiumMesh;
-        const roofStyle = item.params.roofStyle || 'Flat';
+        const roofStyle = roofStyleForItem(item);
         if (roofStyle === 'Hipped') {
             buildHippedRoof(topMesh, towerRing, height);
         } else if (roofStyle === 'Gable') {
@@ -1414,7 +1697,7 @@ function rebuildParcel3D(item) {
 
             const segGeom = new THREE.ExtrudeGeometry(segShape, { depth: segHeight, bevelEnabled: false });
             segGeom.rotateX(-Math.PI / 2);
-            segGeom.translate(0, baseHeight + segHeight, 0);
+            segGeom.translate(0, baseHeight, 0);
 
             const mats = getBuildingMaterials(usage, segFloors);
             const segMesh = new THREE.Mesh(segGeom, mats);
@@ -1434,7 +1717,7 @@ function rebuildParcel3D(item) {
 
         // Add roof details on top based on roof style selection
         if (topMesh && lastRing) {
-            const roofStyle = item.params.roofStyle || 'Flat';
+            const roofStyle = roofStyleForItem(item);
             if (roofStyle === 'Hipped') {
                 buildHippedRoof(topMesh, lastRing, lastHeight);
             } else if (roofStyle === 'Gable') {
@@ -1497,7 +1780,6 @@ function rebuildParcel3D(item) {
                     });
                     const geomA = new THREE.ExtrudeGeometry(shapeA, { depth: heightA, bevelEnabled: false });
                     geomA.rotateX(-Math.PI / 2);
-                    geomA.translate(0, heightA, 0);
 
                     const matsA = getBuildingMaterials(usage, floorsA);
                     const meshA = new THREE.Mesh(geomA, matsA);
@@ -1649,7 +1931,6 @@ function rebuildParcel3D(item) {
                     });
                     const geomB = new THREE.ExtrudeGeometry(shapeB, { depth: heightB, bevelEnabled: false });
                     geomB.rotateX(-Math.PI / 2);
-                    geomB.translate(0, heightB, 0);
 
                     const matsB = getBuildingMaterials('Residential', floorsB);
                     const meshB = new THREE.Mesh(geomB, matsB);
@@ -1686,7 +1967,6 @@ function rebuildParcel3D(item) {
                     });
                     const geomA = new THREE.ExtrudeGeometry(shapeA, { depth: height, bevelEnabled: false });
                     geomA.rotateX(-Math.PI / 2);
-                    geomA.translate(0, height, 0);
 
                     const matsA = getBuildingMaterials(usage, floors);
                     const meshA = new THREE.Mesh(geomA, matsA);
@@ -1695,7 +1975,7 @@ function rebuildParcel3D(item) {
                     meshA.userData = { parcelItem: item };
                     group.add(meshA);
 
-                    const roofStyle = item.params.roofStyle || 'Flat';
+                    const roofStyle = roofStyleForItem(item);
                     if (roofStyle === 'Hipped') {
                         buildHippedRoof(meshA, insetPoly1, height);
                     } else if (roofStyle === 'Gable') {
@@ -1777,12 +2057,11 @@ function rebuildParcel3D(item) {
         });
         bldGeom = new THREE.ExtrudeGeometry(bldShape, { depth: height, bevelEnabled: false });
         bldGeom.rotateX(-Math.PI / 2);
-        bldGeom.translate(0, height, 0);
 
         footprintPoints = insetRing;
     }
 
-    if (typology !== 'PodiumTower' && typology !== 'MultiBuildingBlock') {
+    if (typology !== 'PodiumTower' && typology !== 'SteppedTower' && typology !== 'MultiBuildingBlock') {
         const mats = getBuildingMaterials(usage, floors);
         bldMesh = new THREE.Mesh(bldGeom, mats);
         bldMesh.castShadow = true;
@@ -1791,7 +2070,7 @@ function rebuildParcel3D(item) {
         buildingGroup.add(bldMesh);
 
         // Add Rooftop based on Roof Style parameter
-        const roofStyle = item.params.roofStyle || 'Flat';
+        const roofStyle = roofStyleForItem(item);
         if (roofStyle === 'Hipped') {
             buildHippedRoof(bldMesh, footprintPoints, height);
         } else if (roofStyle === 'Gable') {
@@ -2180,13 +2459,13 @@ function buildUShape(ring, width) {
 function getBuildingMaterials(usage, floors) {
     let colorHex = '#e2e8f0';
     if (usage === 'Residential') {
-        colorHex = '#b45309'; // warm corporate amber-brown
+        colorHex = '#d97706'; // warm amber facade, bright enough for first view
     } else if (usage === 'Commercial') {
-        colorHex = '#0f172a'; // dark steel corporate facade
+        colorHex = '#64748b'; // steel facade without disappearing into the ground
     } else if (usage === 'MixedUse') {
-        colorHex = '#1e3a5f'; // teal-blue mixed-use facade
+        colorHex = '#256d85'; // teal-blue mixed-use facade
     } else if (usage === 'Civic') {
-        colorHex = '#334155'; // professional slate civic facade
+        colorHex = '#7c8da0'; // professional slate civic facade
     }
 
     const textures = createFacadeTextures(colorHex, usage, floors);
@@ -2202,13 +2481,13 @@ function getBuildingMaterials(usage, floors) {
         emissive: new THREE.Color(0xffffff),
         emissiveIntensity: isNight ? 1.0 : 0.0,
         roughness: 0.4,
-        metalness: 0.2,
+        metalness: 0.08,
         transparent: true,
-        opacity: 0.85
+        opacity: 1.0
     });
 
     const roofMat = new THREE.MeshStandardMaterial({
-        color: 0x334155, // concrete grey roof
+        color: 0x6b7280, // concrete grey roof
         roughness: 0.8
     });
 
@@ -2621,7 +2900,6 @@ function buildZoningEnvelope(item, insetRing, maxHeight, isViolated) {
 
     const envGeom = new THREE.ExtrudeGeometry(envShape, { depth: maxHeight, bevelEnabled: false });
     envGeom.rotateX(-Math.PI / 2);
-    envGeom.translate(0, maxHeight, 0);
 
     const envColor = isViolated ? 0xef4444 : 0x06b6d4; // Holographic cyan glow for compliance
     const envMat = new THREE.MeshStandardMaterial({
@@ -2633,6 +2911,7 @@ function buildZoningEnvelope(item, insetRing, maxHeight, isViolated) {
     });
 
     const envMesh = new THREE.Mesh(envGeom, envMat);
+    envMesh.visible = toggleZoningEl ? toggleZoningEl.checked : false;
     scene.add(envMesh);
     item.zoningMesh = envMesh;
 
@@ -2678,44 +2957,609 @@ function drawSetbackErrorLine(item) {
     item.setbackMesh = errorLine;
 }
 
-// Generate animated low-poly traffic cars driving around parcel block perimeters
+function makePlanPoint(x, y) {
+    return { x, y };
+}
+
+function planToVector3(pt, y = 0.02) {
+    return new THREE.Vector3(pt.x, y, -pt.y);
+}
+
+function addPlanQuad(group, start, end, nx, ny, halfWidth, y, material) {
+    const p1 = makePlanPoint(start.x + nx * halfWidth, start.y + ny * halfWidth);
+    const p2 = makePlanPoint(end.x + nx * halfWidth, end.y + ny * halfWidth);
+    const p3 = makePlanPoint(end.x - nx * halfWidth, end.y - ny * halfWidth);
+    const p4 = makePlanPoint(start.x - nx * halfWidth, start.y - ny * halfWidth);
+    const geom = new THREE.BufferGeometry();
+    geom.setFromPoints([
+        planToVector3(p1, y),
+        planToVector3(p2, y),
+        planToVector3(p3, y),
+        planToVector3(p4, y)
+    ]);
+    geom.setIndex([0, 1, 2, 0, 2, 3]);
+    geom.computeVertexNormals();
+    const mesh = new THREE.Mesh(geom, material);
+    mesh.receiveShadow = true;
+    group.add(mesh);
+    return mesh;
+}
+
+function addOffsetLine(group, start, end, nx, ny, offset, y, material, dashed = false) {
+    const a = makePlanPoint(start.x + nx * offset, start.y + ny * offset);
+    const b = makePlanPoint(end.x + nx * offset, end.y + ny * offset);
+    const geom = new THREE.BufferGeometry().setFromPoints([planToVector3(a, y), planToVector3(b, y)]);
+    const line = new THREE.Line(geom, material);
+    if (dashed && line.computeLineDistances) line.computeLineDistances();
+    group.add(line);
+    return line;
+}
+
+function classifyRoadWidth(width) {
+    if (width >= 32) {
+        return { label: "Boulevard + Tram", lanesPerDirection: 2, laneWidth: 3.25, bikeWidth: 1.8, medianWidth: 4.0, sidewalkWidth: Math.min(4.5, Math.max(3.0, width * 0.12)), transit: "tram" };
+    }
+    if (width >= 24) {
+        return { label: "Urban Avenue", lanesPerDirection: 2, laneWidth: 3.25, bikeWidth: 1.5, medianWidth: 2.4, sidewalkWidth: Math.min(4.0, Math.max(2.5, width * 0.12)), transit: null };
+    }
+    if (width >= 15) {
+        return { label: "Collector Street", lanesPerDirection: 1, laneWidth: 3.2, bikeWidth: 1.4, medianWidth: 1.0, sidewalkWidth: Math.min(3.2, Math.max(2.0, width * 0.13)), transit: null };
+    }
+    if (width >= 10) {
+        return { label: "Two-Way Local Street", lanesPerDirection: 1, laneWidth: 3.0, bikeWidth: 0, medianWidth: 0, sidewalkWidth: Math.min(2.4, Math.max(1.6, width * 0.15)), transit: null };
+    }
+    return { label: "Shared Slow Street", lanesPerDirection: 1, laneWidth: Math.max(2.7, width - 3.2), bikeWidth: 0, medianWidth: 0, sidewalkWidth: Math.min(1.6, Math.max(1.0, width * 0.14)), transit: null };
+}
+
+function getParcelSegments(item) {
+    const ring = item.outerRing || [];
+    const segments = [];
+    for (let i = 0; i < ring.length; i++) {
+        const p1 = ring[i];
+        const p2 = ring[(i + 1) % ring.length];
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const len = Math.sqrt(dx * dx + dy * dy);
+        if (len < 6) continue;
+        const ux = dx / len;
+        const uy = dy / len;
+        segments.push({ item, index: i, p1, p2, len, ux, uy, nx: -uy, ny: ux });
+    }
+    return segments;
+}
+
+function inferRoadCorridors() {
+    const allSegments = parcelFeatures.flatMap(getParcelSegments);
+    const candidates = [];
+
+    for (let i = 0; i < allSegments.length; i++) {
+        for (let j = i + 1; j < allSegments.length; j++) {
+            const a = allSegments[i];
+            const b = allSegments[j];
+            if (a.item === b.item) continue;
+
+            const dot = a.ux * b.ux + a.uy * b.uy;
+            if (Math.abs(dot) < 0.94) continue;
+
+            const axis = { x: a.ux, y: a.uy };
+            const normal = { x: a.nx, y: a.ny };
+            const a0 = a.p1.x * axis.x + a.p1.y * axis.y;
+            const a1 = a.p2.x * axis.x + a.p2.y * axis.y;
+            const b0 = b.p1.x * axis.x + b.p1.y * axis.y;
+            const b1 = b.p2.x * axis.x + b.p2.y * axis.y;
+            const aMin = Math.min(a0, a1);
+            const aMax = Math.max(a0, a1);
+            const bMin = Math.min(b0, b1);
+            const bMax = Math.max(b0, b1);
+            let overlapStart = Math.max(aMin, bMin);
+            let overlapEnd = Math.min(aMax, bMax);
+            const overlapLength = overlapEnd - overlapStart;
+            if (overlapLength < 8) continue;
+
+            const d0 = (b.p1.x - a.p1.x) * normal.x + (b.p1.y - a.p1.y) * normal.y;
+            const d1 = (b.p2.x - a.p1.x) * normal.x + (b.p2.y - a.p1.y) * normal.y;
+            if (Math.abs(d0 - d1) > 3.0) continue;
+
+            const signedWidth = (d0 + d1) / 2;
+            const width = Math.abs(signedWidth);
+            if (width < 6 || width > 70) continue;
+
+            const trim = Math.min(4, overlapLength * 0.18);
+            overlapStart += trim;
+            overlapEnd -= trim;
+            if (overlapEnd <= overlapStart) continue;
+
+            const baseOffset = a.p1.x * normal.x + a.p1.y * normal.y;
+            const centerOffset = baseOffset + signedWidth / 2;
+            const start = makePlanPoint(axis.x * overlapStart + normal.x * centerOffset, axis.y * overlapStart + normal.y * centerOffset);
+            const end = makePlanPoint(axis.x * overlapEnd + normal.x * centerOffset, axis.y * overlapEnd + normal.y * centerOffset);
+
+            candidates.push({ start, end, ux: axis.x, uy: axis.y, nx: normal.x, ny: normal.y, width, length: overlapEnd - overlapStart });
+        }
+    }
+
+    candidates.sort((a, b) => (a.width - b.width) || (b.length - a.length));
+    const accepted = [];
+    candidates.forEach(candidate => {
+        const midA = makePlanPoint((candidate.start.x + candidate.end.x) / 2, (candidate.start.y + candidate.end.y) / 2);
+        const tooSimilar = accepted.some(existing => {
+            const midB = makePlanPoint((existing.start.x + existing.end.x) / 2, (existing.start.y + existing.end.y) / 2);
+            const dist = Math.hypot(midA.x - midB.x, midA.y - midB.y);
+            const dirDot = Math.abs(candidate.ux * existing.ux + candidate.uy * existing.uy);
+            return dirDot > 0.96 && dist < Math.min(candidate.width, existing.width) * 0.5;
+        });
+        if (!tooSimilar) accepted.push(candidate);
+    });
+    return accepted;
+}
+
+function renderRoadCorridor(corridor) {
+    const profile = classifyRoadWidth(corridor.width);
+    const group = new THREE.Group();
+    group.userData = { isRoadCorridor: true, profile };
+
+    const asphaltWidth = Math.min(
+        Math.max(3.2, corridor.width - profile.sidewalkWidth * 2),
+        profile.laneWidth * profile.lanesPerDirection * 2 + profile.medianWidth + profile.bikeWidth * 2
+    );
+
+    const asphaltMat = new THREE.MeshStandardMaterial({ color: 0x1f2933, roughness: 0.92, metalness: 0.02, polygonOffset: true, polygonOffsetFactor: -1, polygonOffsetUnits: -1 });
+    addPlanQuad(group, corridor.start, corridor.end, corridor.nx, corridor.ny, asphaltWidth / 2, 0.018, asphaltMat);
+
+    if (profile.bikeWidth > 0) {
+        const bikeMat = new THREE.MeshStandardMaterial({ color: 0x0f766e, roughness: 0.85 });
+        const bikeCenter = asphaltWidth / 2 - profile.bikeWidth / 2;
+        addPlanQuad(group, corridor.start, corridor.end, corridor.nx, corridor.ny, profile.bikeWidth / 2, 0.024, bikeMat).position.set(corridor.nx * bikeCenter, 0, -corridor.ny * bikeCenter);
+        addPlanQuad(group, corridor.start, corridor.end, corridor.nx, corridor.ny, profile.bikeWidth / 2, 0.024, bikeMat).position.set(-corridor.nx * bikeCenter, 0, corridor.ny * bikeCenter);
+    }
+
+    if (profile.medianWidth > 0) {
+        const medianMat = new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.95 });
+        addPlanQuad(group, corridor.start, corridor.end, corridor.nx, corridor.ny, profile.medianWidth / 2, 0.035, medianMat);
+    }
+
+    if (profile.medianWidth === 0) {
+        const centerLineMat = new THREE.LineDashedMaterial({ color: 0xf8fafc, dashSize: 2.5, gapSize: 2.0, transparent: true, opacity: 0.8 });
+        addOffsetLine(group, corridor.start, corridor.end, corridor.nx, corridor.ny, 0, 0.05, centerLineMat, true);
+    }
+
+    const laneLineMat = new THREE.LineDashedMaterial({ color: 0xe5e7eb, dashSize: 3.0, gapSize: 3.5, transparent: true, opacity: 0.55 });
+    for (let side = -1; side <= 1; side += 2) {
+        for (let lane = 1; lane < profile.lanesPerDirection; lane++) {
+            const offset = side * (profile.medianWidth / 2 + lane * profile.laneWidth);
+            addOffsetLine(group, corridor.start, corridor.end, corridor.nx, corridor.ny, offset, 0.052, laneLineMat, true);
+        }
+    }
+
+    if (profile.transit === "tram") {
+        const railMat = new THREE.LineBasicMaterial({ color: 0xcbd5e1, transparent: true, opacity: 0.9 });
+        addOffsetLine(group, corridor.start, corridor.end, corridor.nx, corridor.ny, -0.75, 0.065, railMat);
+        addOffsetLine(group, corridor.start, corridor.end, corridor.nx, corridor.ny, 0.75, 0.065, railMat);
+    }
+
+    corridor.profile = profile;
+    corridor.asphaltWidth = asphaltWidth;
+    scene.add(group);
+    roadMeshes.push(group);
+    return { group, profile, asphaltWidth };
+}
+
+function cross2D(ax, ay, bx, by) {
+    return ax * by - ay * bx;
+}
+
+function lineIntersection2D(a0, a1, b0, b1) {
+    const rx = a1.x - a0.x;
+    const ry = a1.y - a0.y;
+    const sx = b1.x - b0.x;
+    const sy = b1.y - b0.y;
+    const denom = cross2D(rx, ry, sx, sy);
+    if (Math.abs(denom) < 0.0001) return null;
+
+    const qpx = b0.x - a0.x;
+    const qpy = b0.y - a0.y;
+    const t = cross2D(qpx, qpy, sx, sy) / denom;
+    const u = cross2D(qpx, qpy, rx, ry) / denom;
+    if (t < -0.02 || t > 1.02 || u < -0.02 || u > 1.02) return null;
+    return {
+        point: makePlanPoint(a0.x + rx * t, a0.y + ry * t),
+        t,
+        u
+    };
+}
+
+function getCorridorJunctionReach(corridor) {
+    return Math.max(18, Math.min(56, corridor.width * 1.8 + 10));
+}
+
+function getExtendedCorridorSegment(corridor) {
+    const reach = getCorridorJunctionReach(corridor);
+    return {
+        start: makePlanPoint(corridor.start.x - corridor.ux * reach, corridor.start.y - corridor.uy * reach),
+        end: makePlanPoint(corridor.end.x + corridor.ux * reach, corridor.end.y + corridor.uy * reach),
+        reach
+    };
+}
+
+function closestPointOnSegment(pt, a, b) {
+    const vx = b.x - a.x;
+    const vy = b.y - a.y;
+    const wx = pt.x - a.x;
+    const wy = pt.y - a.y;
+    const lenSq = vx * vx + vy * vy;
+    if (lenSq <= 0.0001) return makePlanPoint(a.x, a.y);
+    const t = Math.max(0, Math.min(1, (wx * vx + wy * vy) / lenSq));
+    return makePlanPoint(a.x + vx * t, a.y + vy * t);
+}
+
+function distancePointToSegment(pt, a, b) {
+    const closest = closestPointOnSegment(pt, a, b);
+    return Math.hypot(pt.x - closest.x, pt.y - closest.y);
+}
+
+function shouldRenderRoundabout(connected) {
+    if (connected.length >= 3) return true;
+    if (connected.length !== 2) return false;
+    const a = connected[0].corridor;
+    const b = connected[1].corridor;
+    const dirDot = Math.abs(a.ux * b.ux + a.uy * b.uy);
+    const maxWidth = Math.max(a.width, b.width);
+    return dirDot < 0.45 && maxWidth >= 12;
+}
+
+function inferRoadIntersections(corridors) {
+    const nodes = [];
+
+    const addOrMergeNode = (point, corridorIndices, strength = 1) => {
+        const maxWidth = corridorIndices.reduce((acc, idx) => Math.max(acc, corridors[idx]?.width || 0), 0);
+        const mergeDistance = Math.max(8, Math.min(28, maxWidth * 0.55 + 5));
+        let node = nodes.find(existing => Math.hypot(existing.point.x - point.x, existing.point.y - point.y) < Math.max(existing.mergeDistance, mergeDistance));
+        if (!node) {
+            node = { point: makePlanPoint(point.x, point.y), corridorIndices: new Set(), hits: 0, mergeDistance };
+            nodes.push(node);
+        } else {
+            const weight = Math.max(1, node.hits);
+            node.point.x = (node.point.x * weight + point.x * strength) / (weight + strength);
+            node.point.y = (node.point.y * weight + point.y * strength) / (weight + strength);
+            node.mergeDistance = Math.max(node.mergeDistance, mergeDistance);
+        }
+        corridorIndices.forEach(idx => node.corridorIndices.add(idx));
+        node.hits += strength;
+    };
+
+    for (let i = 0; i < corridors.length; i++) {
+        for (let j = i + 1; j < corridors.length; j++) {
+            const a = corridors[i];
+            const b = corridors[j];
+            const dirDot = Math.abs(a.ux * b.ux + a.uy * b.uy);
+            if (dirDot > 0.86) continue;
+            const hit = lineIntersection2D(a.start, a.end, b.start, b.end);
+            if (hit) {
+                addOrMergeNode(hit.point, [i, j], 2);
+            }
+
+            const extA = getExtendedCorridorSegment(a);
+            const extB = getExtendedCorridorSegment(b);
+            const extendedHit = lineIntersection2D(extA.start, extA.end, extB.start, extB.end);
+            if (extendedHit) {
+                const actualDistA = distancePointToSegment(extendedHit.point, a.start, a.end);
+                const actualDistB = distancePointToSegment(extendedHit.point, b.start, b.end);
+                if (actualDistA <= extA.reach + a.width * 0.5 && actualDistB <= extB.reach + b.width * 0.5) {
+                    addOrMergeNode(extendedHit.point, [i, j], 1);
+                }
+            }
+        }
+    }
+
+    const endpoints = [];
+    corridors.forEach((corridor, idx) => {
+        endpoints.push({ point: corridor.start, idx });
+        endpoints.push({ point: corridor.end, idx });
+    });
+
+    endpoints.forEach(endpoint => {
+        const nearby = endpoints.filter(other => {
+            if (other.idx === endpoint.idx) return false;
+            const width = Math.max(corridors[endpoint.idx].width, corridors[other.idx].width);
+            const threshold = Math.max(10, Math.min(34, width * 0.55 + 8));
+            return Math.hypot(endpoint.point.x - other.point.x, endpoint.point.y - other.point.y) <= threshold;
+        });
+        if (nearby.length > 0) {
+            const all = [endpoint, ...nearby];
+            const avg = all.reduce((acc, item) => {
+                acc.x += item.point.x;
+                acc.y += item.point.y;
+                return acc;
+            }, { x: 0, y: 0 });
+            avg.x /= all.length;
+            avg.y /= all.length;
+            addOrMergeNode(makePlanPoint(avg.x, avg.y), [...new Set(all.map(item => item.idx))], 1);
+        }
+    });
+
+    return nodes.map(node => {
+        const connected = corridors
+            .map((corridor, idx) => ({ corridor, idx }))
+            .filter(({ corridor, idx }) => {
+                if (node.corridorIndices.has(idx)) return true;
+                const tolerance = Math.max(7, corridor.width * 0.45);
+                return distancePointToSegment(node.point, corridor.start, corridor.end) <= tolerance;
+            });
+        const maxWidth = connected.reduce((acc, item) => Math.max(acc, item.corridor.width), 0);
+        const radius = Math.max(6, Math.min(18, maxWidth * 0.32 + connected.length * 1.1));
+        const kind = shouldRenderRoundabout(connected) ? 'roundabout' : 'signalized';
+        return {
+            point: node.point,
+            connected,
+            radius,
+            kind
+        };
+    }).filter(node => node.connected.length >= 2);
+}
+
+function addCrosswalk(group, node, corridor) {
+    const profile = corridor.profile || classifyRoadWidth(corridor.width);
+    const asphaltWidth = corridor.asphaltWidth || Math.max(4, corridor.width - profile.sidewalkWidth * 2);
+    const center = node.point;
+    const mid = makePlanPoint((corridor.start.x + corridor.end.x) / 2, (corridor.start.y + corridor.end.y) / 2);
+    const awaySign = ((mid.x - center.x) * corridor.ux + (mid.y - center.y) * corridor.uy) >= 0 ? 1 : -1;
+    const stripeMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.75, transparent: true, opacity: 0.92 });
+    const halfCross = Math.min(asphaltWidth * 0.5 + 0.8, corridor.width * 0.5 - 0.6);
+    const baseOffset = node.radius + 2.4;
+    const stripeCount = 5;
+    const stripeGap = 0.82;
+
+    for (let i = 0; i < stripeCount; i++) {
+        const alongOffset = baseOffset + (i - (stripeCount - 1) / 2) * stripeGap;
+        const stripeCenter = makePlanPoint(
+            center.x + corridor.ux * awaySign * alongOffset,
+            center.y + corridor.uy * awaySign * alongOffset
+        );
+        const a = makePlanPoint(stripeCenter.x - corridor.nx * halfCross, stripeCenter.y - corridor.ny * halfCross);
+        const b = makePlanPoint(stripeCenter.x + corridor.nx * halfCross, stripeCenter.y + corridor.ny * halfCross);
+        addPlanQuad(group, a, b, corridor.ux * awaySign, corridor.uy * awaySign, 0.22, 0.085, stripeMat);
+    }
+}
+
+function addIntersectionApproach(group, node, corridor, material) {
+    const profile = corridor.profile || classifyRoadWidth(corridor.width);
+    const asphaltWidth = corridor.asphaltWidth || Math.max(4, corridor.width - profile.sidewalkWidth * 2);
+    const center = node.point;
+    const closest = closestPointOnSegment(center, corridor.start, corridor.end);
+    const dist = Math.hypot(center.x - closest.x, center.y - closest.y);
+    if (dist < node.radius * 0.6) return;
+
+    const from = makePlanPoint(
+        center.x + ((closest.x - center.x) / dist) * node.radius * 0.25,
+        center.y + ((closest.y - center.y) / dist) * node.radius * 0.25
+    );
+    addPlanQuad(group, from, closest, corridor.nx, corridor.ny, asphaltWidth / 2, 0.062, material);
+}
+
+function addRoundaboutDirectionMarkings(group, node, material) {
+    const ringRadius = node.radius * 0.76;
+    const markerGeom = new THREE.BoxGeometry(1.9, 0.035, 0.42);
+    for (let i = 0; i < 8; i++) {
+        const angle = (i / 8) * Math.PI * 2;
+        const marker = new THREE.Mesh(markerGeom, material);
+        marker.position.set(
+            node.point.x + Math.cos(angle) * ringRadius,
+            0.14,
+            -node.point.y - Math.sin(angle) * ringRadius
+        );
+        marker.rotation.y = -angle + Math.PI * 0.5;
+        marker.receiveShadow = true;
+        group.add(marker);
+    }
+}
+
+function buildTrafficSignal(x, z, heading) {
+    const group = new THREE.Group();
+    group.position.set(x, 0, z);
+    group.rotation.y = heading;
+
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x334155, roughness: 0.65, metalness: 0.2 });
+    const housingMat = new THREE.MeshStandardMaterial({ color: 0x111827, roughness: 0.7 });
+    const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.08, 0.08, 3.2, 10), poleMat);
+    pole.position.y = 1.6;
+    pole.castShadow = true;
+    group.add(pole);
+
+    const arm = new THREE.Mesh(new THREE.BoxGeometry(1.15, 0.08, 0.08), poleMat);
+    arm.position.set(0.5, 3.05, 0);
+    arm.castShadow = true;
+    group.add(arm);
+
+    const housing = new THREE.Mesh(new THREE.BoxGeometry(0.34, 1.0, 0.24), housingMat);
+    housing.position.set(1.05, 2.75, -0.04);
+    housing.castShadow = true;
+    group.add(housing);
+
+    const lampColors = [0xef4444, 0xfacc15, 0x22c55e];
+    lampColors.forEach((color, idx) => {
+        const lampMat = new THREE.MeshStandardMaterial({
+            color,
+            emissive: color,
+            emissiveIntensity: idx === 2 ? 0.85 : 0.25,
+            roughness: 0.35
+        });
+        const lamp = new THREE.Mesh(new THREE.SphereGeometry(0.095, 12, 12), lampMat);
+        lamp.position.set(1.05, 3.06 - idx * 0.28, -0.18);
+        group.add(lamp);
+    });
+
+    return group;
+}
+
+function addIntersectionSignals(group, node, corridor) {
+    const profile = corridor.profile || classifyRoadWidth(corridor.width);
+    const asphaltWidth = corridor.asphaltWidth || Math.max(4, corridor.width - profile.sidewalkWidth * 2);
+    const center = node.point;
+    const mid = makePlanPoint((corridor.start.x + corridor.end.x) / 2, (corridor.start.y + corridor.end.y) / 2);
+    const awaySign = ((mid.x - center.x) * corridor.ux + (mid.y - center.y) * corridor.uy) >= 0 ? 1 : -1;
+    const signalDistance = node.radius + 5.0;
+    const sideOffset = asphaltWidth * 0.5 + 1.2;
+    const heading = Math.atan2(-corridor.uy * awaySign, corridor.ux * awaySign);
+
+    [-1, 1].forEach(side => {
+        const x = center.x + corridor.ux * awaySign * signalDistance + corridor.nx * side * sideOffset;
+        const y = center.y + corridor.uy * awaySign * signalDistance + corridor.ny * side * sideOffset;
+        group.add(buildTrafficSignal(x, -y, heading));
+    });
+}
+
+function renderRoadIntersections(corridors) {
+    const nodes = inferRoadIntersections(corridors);
+    const asphaltMat = new THREE.MeshStandardMaterial({ color: 0x202a33, roughness: 0.94, metalness: 0.02, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+    const approachMat = new THREE.MeshStandardMaterial({ color: 0x202a33, roughness: 0.94, metalness: 0.02, polygonOffset: true, polygonOffsetFactor: -3, polygonOffsetUnits: -3 });
+    const islandMat = new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.95 });
+    const curbMat = new THREE.MeshStandardMaterial({ color: 0xe5e7eb, roughness: 0.8 });
+    const markingMat = new THREE.MeshStandardMaterial({ color: 0xf8fafc, roughness: 0.8, transparent: true, opacity: 0.85 });
+
+    nodes.forEach(node => {
+        const group = new THREE.Group();
+        group.userData = { isRoadIntersection: true, kind: node.kind };
+
+        const asphalt = new THREE.Mesh(new THREE.CircleGeometry(node.radius + 2.8, 48), asphaltMat);
+        asphalt.rotation.x = -Math.PI / 2;
+        asphalt.position.set(node.point.x, 0.055, -node.point.y);
+        asphalt.receiveShadow = true;
+        group.add(asphalt);
+
+        if (node.kind === 'roundabout') {
+            const islandRadius = Math.max(2.4, node.radius * 0.42);
+            const island = new THREE.Mesh(new THREE.CircleGeometry(islandRadius, 40), islandMat);
+            island.rotation.x = -Math.PI / 2;
+            island.position.set(node.point.x, 0.095, -node.point.y);
+            island.receiveShadow = true;
+            group.add(island);
+
+            const curb = new THREE.Mesh(new THREE.TorusGeometry(islandRadius + 0.18, 0.08, 8, 48), curbMat);
+            curb.rotation.x = Math.PI / 2;
+            curb.position.set(node.point.x, 0.16, -node.point.y);
+            curb.castShadow = true;
+            group.add(curb);
+
+            const laneRing = new THREE.Mesh(new THREE.TorusGeometry(node.radius * 0.72, 0.035, 6, 56), markingMat);
+            laneRing.rotation.x = Math.PI / 2;
+            laneRing.position.set(node.point.x, 0.12, -node.point.y);
+            group.add(laneRing);
+
+            addRoundaboutDirectionMarkings(group, node, markingMat);
+        }
+
+        node.connected.forEach(({ corridor }) => {
+            addIntersectionApproach(group, node, corridor, approachMat);
+            addCrosswalk(group, node, corridor);
+            addIntersectionSignals(group, node, corridor);
+        });
+
+        scene.add(group);
+        intersectionMeshes.push(group);
+    });
+
+    return nodes;
+}
+
+// Generate animated low-poly traffic cars on inferred road corridors between parcel blocks
 function generateTrafficCars() {
     // Clear old traffic cars
     trafficCars.forEach(car => {
-        scene.remove(car.carMesh);
+        if (car.carMesh) {
+            scene.remove(car.carMesh);
+            disposeObject3D(car.carMesh);
+        }
     });
     trafficCars = [];
 
-    // Find suitable loop tracks: sidewalk boundaries expanded by 3.5m are roads!
-    parcelFeatures.forEach(item => {
-        const roadRing = offsetPolygonRing(item.outerRing, -4.5);
-        if (!roadRing) return;
+    roadMeshes.forEach(mesh => {
+        scene.remove(mesh);
+        disposeObject3D(mesh);
+    });
+    roadMeshes = [];
 
-        // Spawn 2 cars per parcel block
-        const colors = [0xef4444, 0x3b82f6, 0xf59e0b, 0x10b981];
-        
-        for (let i = 0; i < 2; i++) {
-            const carColor = colors[Math.floor(Math.random() * colors.length)];
+    intersectionMeshes.forEach(mesh => {
+        scene.remove(mesh);
+        disposeObject3D(mesh);
+    });
+    intersectionMeshes = [];
+
+    const corridors = inferRoadCorridors();
+    const colors = [0xef4444, 0x3b82f6, 0xf59e0b, 0x10b981, 0xf8fafc, 0x8b5cf6];
+
+    corridors.forEach(corridor => {
+        const rendered = renderRoadCorridor(corridor);
+        const profile = rendered.profile;
+        const baseOffset = profile.medianWidth / 2 + profile.laneWidth / 2;
+        const laneOffsets = [-baseOffset, baseOffset];
+
+        if (profile.lanesPerDirection > 1) {
+            laneOffsets.push(-(baseOffset + profile.laneWidth), baseOffset + profile.laneWidth);
+        }
+
+        laneOffsets.forEach((laneOffset, idx) => {
+            const carColor = colors[(idx + Math.floor(Math.random() * colors.length)) % colors.length];
             const carMesh = buildDetailedCar(carColor, 1.35);
             scene.add(carMesh);
 
             trafficCars.push({
-                carMesh: carMesh,
-                roadRing: roadRing,
-                speed: 0.0125 + Math.random() * 0.0125,
-                progress: Math.random() * roadRing.length
+                carMesh,
+                path: [corridor.start, corridor.end],
+                nx: corridor.nx,
+                ny: corridor.ny,
+                laneOffset,
+                direction: laneOffset < 0 ? 1 : -1,
+                speed: 0.0015 + Math.random() * 0.0012,
+                progress: Math.random()
             });
-        }
+        });
     });
+
+    const intersections = renderRoadIntersections(corridors);
+    updateLayersVisibility();
+
+    window.planxDebug = {
+        roadCorridors: corridors.map(corridor => ({
+            width: Number(corridor.width.toFixed(2)),
+            length: Number(corridor.length.toFixed(2)),
+            profile: classifyRoadWidth(corridor.width).label
+        })),
+        intersections: intersections.map(node => ({
+            kind: node.kind,
+            arms: node.connected.length,
+            radius: Number(node.radius.toFixed(1))
+        })),
+        trafficCars: trafficCars.length
+    };
 
     // Make sure headlights match current slider value immediately
     updateSolarPhysics(parseFloat(inTime.value));
 }
 
-// Drive cars along their respective road loop loops
+// Drive cars along inferred road centerlines
 function updateTraffic() {
     trafficCars.forEach(car => {
+        if (car.path && car.path.length === 2) {
+            car.progress += car.speed * car.direction;
+            if (car.progress > 1) car.progress -= 1;
+            if (car.progress < 0) car.progress += 1;
+
+            const pt1 = car.path[0];
+            const pt2 = car.path[1];
+            const t = car.progress;
+            const x = pt1.x + (pt2.x - pt1.x) * t + car.nx * car.laneOffset;
+            const y = pt1.y + (pt2.y - pt1.y) * t + car.ny * car.laneOffset;
+
+            car.carMesh.position.set(x, 0.05, -y);
+            const dx = pt2.x - pt1.x;
+            const dy = pt2.y - pt1.y;
+            const heading = Math.atan2(-dy, dx) + (car.direction < 0 ? Math.PI : 0);
+            car.carMesh.rotation.y = heading;
+            return;
+        }
+
         const ring = car.roadRing;
+        if (!ring || ring.length < 2) return;
         car.progress += car.speed;
         
         // Find segment indices based on progress
@@ -2822,7 +3666,7 @@ function selectParcel(item) {
     inFloorHeight.value = item.params.floorHeight;
     inTypology.value = item.params.typology;
     inUsage.value = item.params.usage;
-    inRoofStyle.value = item.params.roofStyle || 'Flat';
+    inRoofStyle.value = roofStyleForItem(item);
     
     inStepbackInterval.value = item.params.stepbackInterval || 4;
     inStepbackDepth.value = item.params.stepbackDepth || 1.5;
@@ -2920,6 +3764,184 @@ function setBuildingHighlight(meshOrGroup, isSelected) {
             }
         }
     });
+}
+
+function calculateParcelMetrics(item) {
+    const params = item.params || {};
+    const setback = parseFloat(params.setback) || 0;
+    const floors = parseInt(params.floors) || 0;
+    const floorHeight = parseFloat(params.floorHeight) || 3.0;
+    const typology = params.typology || 'Tower';
+    const usage = params.usage || 'Residential';
+    const height = usage === 'Park' ? 0 : floors * floorHeight;
+    const insetRing = offsetPolygonRing(item.outerRing, setback);
+    let footprintArea = 0;
+    let gfa = 0;
+
+    if (usage !== 'Park' && insetRing && insetRing.length >= 3) {
+        if (typology === 'Courtyard') {
+            const innerSetback = 8;
+            const innerRing = offsetPolygonRing(insetRing, innerSetback);
+            const outerArea = calculatePolygonArea(insetRing);
+            const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
+            footprintArea = Math.max(0, outerArea - innerArea);
+            gfa = footprintArea * floors;
+        } else if (typology === 'Slab') {
+            const slabShape = buildSlabShape(insetRing, 12);
+            footprintArea = calculateShapeArea(slabShape);
+            gfa = footprintArea * floors;
+        } else if (typology === 'LShape') {
+            const lShape = buildLShape(insetRing, 12);
+            footprintArea = calculateShapeArea(lShape);
+            gfa = footprintArea * floors;
+        } else if (typology === 'UShape') {
+            const uShape = buildUShape(insetRing, 12);
+            footprintArea = calculateShapeArea(uShape);
+            gfa = footprintArea * floors;
+        } else if (typology === 'PodiumTower') {
+            const podiumArea = calculatePolygonArea(insetRing);
+            const towerRing = offsetPolygonRing(insetRing, 3.5) || insetRing;
+            const towerArea = calculatePolygonArea(towerRing);
+            const podiumH = Math.min(height, 2 * floorHeight);
+            const towerH = Math.max(0, height - podiumH);
+            const podiumFloors = Math.round(podiumH / floorHeight);
+            const towerFloors = Math.round(towerH / floorHeight);
+            footprintArea = podiumArea;
+            gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
+        } else if (typology === 'SteppedTower') {
+            const stepInterval = params.stepbackInterval || 4;
+            const stepDepth = params.stepbackDepth || 1.5;
+            let remainingFloors = floors;
+            let segmentIndex = 0;
+            footprintArea = calculatePolygonArea(insetRing);
+            while (remainingFloors > 0) {
+                const currentSetback = setback + segmentIndex * stepDepth;
+                const segmentRing = offsetPolygonRing(item.outerRing, currentSetback);
+                if (!segmentRing || segmentRing.length < 3) break;
+                const segFloors = Math.min(stepInterval, remainingFloors);
+                const segArea = calculatePolygonArea(segmentRing);
+                gfa += segArea * segFloors;
+                remainingFloors -= segFloors;
+                segmentIndex++;
+            }
+        } else if (typology === 'MultiBuildingBlock') {
+            const ob = getOrientedBounds(insetRing);
+            const W = ob.W;
+            const localRing = insetRing.map(pt => {
+                const rx = pt.x - ob.cx;
+                const ry = pt.y - ob.cy;
+                return {
+                    x: rx * ob.ux + ry * ob.uy,
+                    y: rx * ob.nx + ry * ob.ny
+                };
+            });
+            const floorsA = Math.round(floors * 1.3);
+            const floorsB = Math.round(floors * 0.7);
+            if (W >= 40) {
+                const localPoly1 = clipConvexPolygonVertical(localRing, ob.minX, ob.minX + W * 0.38);
+                const localPoly3 = clipConvexPolygonVertical(localRing, ob.minX + W * 0.62, ob.maxX);
+                let insetPoly1 = null;
+                let insetPoly3 = null;
+                if (localPoly1 && localPoly1.length >= 3) {
+                    const globalPoly1 = localPoly1.map(pt => ({
+                        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                    }));
+                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                }
+                if (localPoly3 && localPoly3.length >= 3) {
+                    const globalPoly3 = localPoly3.map(pt => ({
+                        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                    }));
+                    insetPoly3 = offsetPolygonRing(globalPoly3, 1.2);
+                }
+                if (insetPoly1 && insetPoly1.length >= 3) {
+                    const a1 = calculatePolygonArea(insetPoly1);
+                    footprintArea += a1;
+                    gfa += a1 * floorsA;
+                }
+                if (insetPoly3 && insetPoly3.length >= 3) {
+                    const a3 = calculatePolygonArea(insetPoly3);
+                    footprintArea += a3;
+                    gfa += a3 * floorsB;
+                }
+            } else {
+                const localPoly1 = clipConvexPolygonVertical(localRing, ob.minX, ob.minX + W * 0.5);
+                let insetPoly1 = null;
+                if (localPoly1 && localPoly1.length >= 3) {
+                    const globalPoly1 = localPoly1.map(pt => ({
+                        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                    }));
+                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                }
+                if (insetPoly1 && insetPoly1.length >= 3) {
+                    const a1 = calculatePolygonArea(insetPoly1);
+                    footprintArea += a1;
+                    gfa += a1 * floors;
+                }
+            }
+        } else {
+            footprintArea = calculatePolygonArea(insetRing);
+            gfa = footprintArea * floors;
+        }
+    }
+
+    const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
+    const far = item.area > 0 ? (gfa / item.area) : 0;
+    const heightViolation = usage !== 'Park' && height > params.maxHeight;
+    const bcrViolation = bcr > params.maxBcr;
+    const farViolation = far > params.maxFar;
+    const footprintViolation = usage !== 'Park' && footprintArea === 0;
+    const violated = heightViolation || bcrViolation || farViolation || footprintViolation;
+
+    let dwellingUnits = 0;
+    let population = 0;
+    const AVG_UNIT_SIZE = 100;
+    const AVG_PERSONS = 2.8;
+    if (usage === 'Residential') {
+        dwellingUnits = Math.floor(gfa / AVG_UNIT_SIZE);
+        population = Math.round(dwellingUnits * AVG_PERSONS);
+    } else if (usage === 'MixedUse') {
+        const residentialGfa = Math.max(0, gfa - footprintArea);
+        dwellingUnits = Math.floor(residentialGfa / AVG_UNIT_SIZE);
+        population = Math.round(dwellingUnits * AVG_PERSONS);
+    } else if (usage === 'Commercial' || usage === 'Civic') {
+        population = Math.round(gfa / 15);
+    }
+
+    const densityPpHa = item.area > 0 ? Math.round(population / (item.area / 10000)) : 0;
+    const osr = gfa > 0 ? ((item.area - footprintArea) / gfa) : 0;
+    let carbonFactor = 0;
+    if (usage === 'Residential') carbonFactor = 0.045;
+    else if (usage === 'MixedUse') carbonFactor = 0.055;
+    else if (usage === 'Commercial') carbonFactor = 0.075;
+    else if (usage === 'Civic') carbonFactor = 0.050;
+    const carbon = gfa * carbonFactor;
+    const runoff = bcr * 0.90 + (1 - bcr) * 0.15;
+
+    return {
+        setback,
+        floors,
+        floorHeight,
+        typology,
+        usage,
+        height,
+        insetRing,
+        footprintArea,
+        gfa,
+        bcr,
+        far,
+        violated,
+        status: violated ? "VIOLATION" : "COMPLIANT",
+        dwellingUnits,
+        population,
+        densityPpHa,
+        osr,
+        carbon,
+        runoff
+    };
 }
 
 // Live calculation of regulatory compliance metrics (FAR, BCR, Height)
@@ -3185,118 +4207,31 @@ function exportPlanningReport() {
         const rows = [headers.join(",")];
 
         parcelFeatures.forEach(item => {
-            const setback = item.params.setback;
-            const floors = item.params.floors;
-            const floorHeight = item.params.floorHeight;
-            const height = floors * floorHeight;
-            const typology = item.params.typology;
-            const usage = item.params.usage;
-            
-            // Calculate footprint area and GFA
-            const insetRing = offsetPolygonRing(item.outerRing, setback);
-            let footprintArea = 0;
-            let gfa = 0;
-            
-            if (usage === 'Park') {
-                footprintArea = 0;
-                gfa = 0;
-            } else if (insetRing && insetRing.length >= 3) {
-                if (typology === 'Courtyard') {
-                    const innerSetback = 8;
-                    const innerRing = offsetPolygonRing(insetRing, innerSetback);
-                    const outerArea = calculatePolygonArea(insetRing);
-                    const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
-                    footprintArea = Math.max(0, outerArea - innerArea);
-                    gfa = footprintArea * floors;
-                } else if (typology === 'Slab') {
-                    const slabShape = buildSlabShape(insetRing, 12);
-                    footprintArea = calculateShapeArea(slabShape);
-                    gfa = footprintArea * floors;
-                } else if (typology === 'LShape') {
-                    const lShape = buildLShape(insetRing, 12);
-                    footprintArea = calculateShapeArea(lShape);
-                    gfa = footprintArea * floors;
-                } else if (typology === 'UShape') {
-                    const uShape = buildUShape(insetRing, 12);
-                    footprintArea = calculateShapeArea(uShape);
-                    gfa = footprintArea * floors;
-                } else if (typology === 'PodiumTower') {
-                    const podiumArea = calculatePolygonArea(insetRing);
-                    const towerRing = offsetPolygonRing(insetRing, 3.5) || insetRing;
-                    const towerArea = calculatePolygonArea(towerRing);
-                    const podiumH = Math.min(height, 2 * floorHeight);
-                    const towerH = Math.max(0, height - podiumH);
-                    const podiumFloors = Math.round(podiumH / floorHeight);
-                    const towerFloors = Math.round(towerH / floorHeight);
-                    footprintArea = podiumArea;
-                    gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
-                } else if (typology === 'SteppedTower') {
-                    const stepInterval = item.params.stepbackInterval || 4;
-                    const stepDepth = item.params.stepbackDepth || 1.5;
-                    let remainingFloors = floors;
-                    let segmentIndex = 0;
-                    footprintArea = calculatePolygonArea(insetRing);
-                    gfa = 0;
-                    while (remainingFloors > 0) {
-                        const currentSetback = setback + segmentIndex * stepDepth;
-                        const segmentRing = offsetPolygonRing(item.outerRing, currentSetback);
-                        if (!segmentRing || segmentRing.length < 3) break;
-                        const segFloors = Math.min(stepInterval, remainingFloors);
-                        const segArea = calculatePolygonArea(segmentRing);
-                        gfa += segArea * segFloors;
-                        remainingFloors -= segFloors;
-                        segmentIndex++;
-                    }
-                } else { // Tower
-                    footprintArea = calculatePolygonArea(insetRing);
-                    gfa = footprintArea * floors;
-                }
-            }
-
-            const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
-            const far = item.area > 0 ? (gfa / item.area) : 0;
-
-            const heightViolation = usage !== 'Park' && height > item.params.maxHeight;
-            const bcrViolation = bcr > item.params.maxBcr;
-            const farViolation = far > item.params.maxFar;
-            const violated = heightViolation || bcrViolation || farViolation || (usage !== 'Park' && footprintArea === 0);
-            const status = violated ? "VIOLATION" : "COMPLIANT";
-
-            // Dwelling units and population
-            let dwellingUnits = 0;
-            let population = 0;
-            const AVG_UNIT_SIZE = 100;
-            const AVG_PERSONS = 2.8;
-
-            if (usage === 'Residential') {
-                dwellingUnits = Math.floor(gfa / AVG_UNIT_SIZE);
-                population = Math.round(dwellingUnits * AVG_PERSONS);
-            } else if (usage === 'MixedUse') {
-                const residentialGfa = Math.max(0, gfa - footprintArea);
-                dwellingUnits = Math.floor(residentialGfa / AVG_UNIT_SIZE);
-                population = Math.round(dwellingUnits * AVG_PERSONS);
-            } else if (usage === 'Commercial' || usage === 'Civic') {
-                dwellingUnits = 0;
-                population = Math.round(gfa / 15);
-            }
-            const densityPpHa = item.area > 0 ? Math.round(population / (item.area / 10000)) : 0;
-
-            // Sustainability
-            const osr = gfa > 0 ? ((item.area - footprintArea) / gfa) : 0;
-            let carbonFactor = 0;
-            if (usage === 'Residential') carbonFactor = 0.045;
-            else if (usage === 'MixedUse') carbonFactor = 0.055;
-            else if (usage === 'Commercial') carbonFactor = 0.075;
-            else if (usage === 'Civic') carbonFactor = 0.050;
-            const carbon = gfa * carbonFactor;
-            const runoff = bcr * 0.90 + (1 - bcr) * 0.15;
+            const metrics = calculateParcelMetrics(item);
+            const setback = metrics.setback;
+            const floors = metrics.floors;
+            const floorHeight = metrics.floorHeight;
+            const height = metrics.height;
+            const typology = metrics.typology;
+            const usage = metrics.usage;
+            const footprintArea = metrics.footprintArea;
+            const gfa = metrics.gfa;
+            const bcr = metrics.bcr;
+            const far = metrics.far;
+            const status = metrics.status;
+            const dwellingUnits = metrics.dwellingUnits;
+            const population = metrics.population;
+            const densityPpHa = metrics.densityPpHa;
+            const osr = metrics.osr;
+            const carbon = metrics.carbon;
+            const runoff = metrics.runoff;
 
             const row = [
                 item.fid !== undefined ? item.fid : "",
                 item.area.toFixed(1),
                 usage,
                 typology,
-                item.params.roofStyle || "Flat",
+                roofStyleForItem(item),
                 setback.toFixed(1),
                 floors,
                 floorHeight.toFixed(1),
@@ -3363,8 +4298,8 @@ async function syncToQGIS() {
     btnSync.textContent = "Syncing...";
 
     const updates = modifiedParcels.map(item => {
-        const setback = item.params.setback;
-        const insetRing = offsetPolygonRing(item.outerRing, setback);
+        const metrics = calculateParcelMetrics(item);
+        const insetRing = metrics.insetRing;
         
         let geoCoords = [];
         if (insetRing) {
@@ -3372,73 +4307,12 @@ async function syncToQGIS() {
                 return [pt.x + centerX, pt.y + centerY];
             });
         }
-        
-        // Calculate FAR and BCR actuals based on geometry typology
-        let footprintArea = 0;
-        let gfa = 0;
-        const height = item.params.floors * item.params.floorHeight;
-        
-        if (item.params.usage !== 'Park') {
-            if (item.params.typology === 'Courtyard') {
-                const innerSetback = 8;
-                const innerRing = offsetPolygonRing(insetRing, innerSetback);
-                const outerArea = calculatePolygonArea(insetRing);
-                const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
-                footprintArea = Math.max(0, outerArea - innerArea);
-                gfa = footprintArea * item.params.floors;
-            } else if (item.params.typology === 'Slab') {
-                const slabShape = buildSlabShape(insetRing, 12);
-                footprintArea = calculateShapeArea(slabShape);
-                gfa = footprintArea * item.params.floors;
-            } else if (item.params.typology === 'LShape') {
-                const lShape = buildLShape(insetRing, 12);
-                footprintArea = calculateShapeArea(lShape);
-                gfa = footprintArea * item.params.floors;
-            } else if (item.params.typology === 'UShape') {
-                const uShape = buildUShape(insetRing, 12);
-                footprintArea = calculateShapeArea(uShape);
-                gfa = footprintArea * item.params.floors;
-            } else if (item.params.typology === 'PodiumTower') {
-                const podiumH = Math.min(height, 2 * item.params.floorHeight);
-                const towerH = Math.max(0, height - podiumH);
-                const podiumArea = calculatePolygonArea(insetRing);
-                const towerRing = offsetPolygonRing(insetRing, 3.5) || insetRing;
-                const towerArea = calculatePolygonArea(towerRing);
-                const podiumFloors = Math.round(podiumH / item.params.floorHeight);
-                const towerFloors = Math.round(towerH / item.params.floorHeight);
-                footprintArea = podiumArea;
-                gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
-            } else if (item.params.typology === 'SteppedTower') {
-                const stepInterval = item.params.stepbackInterval || 4;
-                const stepDepth = item.params.stepbackDepth || 1.5;
-                let remainingFloors = item.params.floors;
-                let segmentIndex = 0;
-                footprintArea = calculatePolygonArea(insetRing);
-                gfa = 0;
-                while (remainingFloors > 0) {
-                    const currentSetback = setback + segmentIndex * stepDepth;
-                    const segmentRing = offsetPolygonRing(item.outerRing, currentSetback);
-                    if (!segmentRing || segmentRing.length < 3) break;
-                    const segFloors = Math.min(stepInterval, remainingFloors);
-                    const segArea = calculatePolygonArea(segmentRing);
-                    gfa += segArea * segFloors;
-                    remainingFloors -= segFloors;
-                    segmentIndex++;
-                }
-            } else { // Tower
-                footprintArea = calculatePolygonArea(insetRing);
-                gfa = footprintArea * item.params.floors;
-            }
-        }
-        
-        const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
-        const far = item.area > 0 ? (gfa / item.area) : 0;
-        
+
         return {
             id: item.fid,
-            far: parseFloat(far.toFixed(2)),
-            bcr: parseFloat(bcr.toFixed(2)),
-            gfa: Math.round(gfa),
+            far: parseFloat(metrics.far.toFixed(2)),
+            bcr: parseFloat(metrics.bcr.toFixed(2)),
+            gfa: Math.round(metrics.gfa),
             setback: item.params.setback,
             floors: item.params.floors,
             floor_h: item.params.floorHeight,
@@ -3447,7 +4321,7 @@ async function syncToQGIS() {
             max_bcr: item.params.maxBcr,
             max_far: item.params.maxFar,
             max_height: item.params.maxHeight,
-            roof_style: item.params.roofStyle || 'Flat',
+            roof_style: roofStyleForItem(item),
             stepback_i: item.params.stepbackInterval || 4,
             stepback_d: item.params.stepbackDepth || 1.5,
             coordinates: geoCoords
@@ -3717,7 +4591,7 @@ function applyToAllParcels() {
         `Apply the current design parameters to all ${parcelFeatures.length} parcels?\n\n` +
         `Typology: ${templateParams.typology}\n` +
         `Usage: ${templateParams.usage}\n` +
-        `Roof Style: ${templateParams.roofStyle || 'Flat'}\n` +
+        `Roof Style: ${templateParams.roofStyle || defaultRoofStyleFor(templateParams.usage, templateParams.typology)}\n` +
         `Floors: ${templateParams.floors}\n` +
         `Floor Height: ${templateParams.floorHeight}m\n` +
         `Setback: ${templateParams.setback}m\n\n` +
@@ -3812,15 +4686,25 @@ function clearScene() {
         }
     });
     trafficCars = [];
+
+    roadMeshes.forEach(mesh => {
+        scene.remove(mesh);
+        disposeObject3D(mesh);
+    });
+    roadMeshes = [];
+
+    intersectionMeshes.forEach(mesh => {
+        scene.remove(mesh);
+        disposeObject3D(mesh);
+    });
+    intersectionMeshes = [];
 }
 
 // Deep dispose helper for geometry, material, textures
 function disposeObject3D(obj) {
     obj.traverse(child => {
-        if (child.isMesh) {
-            if (child.geometry) child.geometry.dispose();
-            disposeMaterialOrMaterials(child.material);
-        }
+        if (child.geometry) child.geometry.dispose();
+        disposeMaterialOrMaterials(child.material);
     });
 }
 
@@ -3854,12 +4738,12 @@ function disposeSingleMaterial(m) {
 
 function updateLayersVisibility() {
     const showBuildings = toggleBuildingsEl ? toggleBuildingsEl.checked : true;
-    const showZoning = toggleZoningEl ? toggleZoningEl.checked : true;
+    const showZoning = toggleZoningEl ? toggleZoningEl.checked : false;
     const showSetbacks = toggleSetbacksEl ? toggleSetbacksEl.checked : true;
     const showSidewalks = toggleSidewalksEl ? toggleSidewalksEl.checked : true;
     const showPedestrians = togglePedestriansEl ? togglePedestriansEl.checked : true;
     const showTraffic = toggleTrafficEl ? toggleTrafficEl.checked : true;
-    const showGrid = toggleGridEl ? toggleGridEl.checked : true;
+    const showGrid = toggleGridEl ? toggleGridEl.checked : false;
 
     // Toggle grid
     if (gridHelper) {
@@ -3890,6 +4774,14 @@ function updateLayersVisibility() {
     // Toggle traffic car meshes
     trafficCars.forEach(car => {
         if (car.carMesh) car.carMesh.visible = showTraffic;
+    });
+
+    roadMeshes.forEach(mesh => {
+        mesh.visible = showTraffic;
+    });
+
+    intersectionMeshes.forEach(mesh => {
+        mesh.visible = showTraffic;
     });
 }
 
@@ -5181,4 +6073,3 @@ function buildDetailedCar(colorHex, scale = 1.0) {
 
     return carGroup;
 }
-

@@ -4,5 +4,6 @@ __pycache__/
 .idea/
 .vscode/
 *.swp
+server_debug.log
 Thumbs.db
 .DS_Store

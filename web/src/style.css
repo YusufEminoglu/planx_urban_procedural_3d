@@ -1,6 +1,4 @@
 /* style.css - PlanX Urban Procedural 3D */
-@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
-
 :root {
     --bg-dark: #090d16;
     --panel-bg: rgba(15, 23, 42, 0.76);
@@ -687,5 +685,40 @@ input[type="range"]::-webkit-slider-thumb:hover {
     opacity: 0.85;
 }
 
+@media (max-width: 700px) {
+    .hud-bar {
+        top: 10px;
+        left: 10px;
+        max-width: calc(100vw - 20px);
+        flex-wrap: wrap;
+        gap: 6px;
+        padding: 6px;
+    }
 
+    .hud-chip {
+        flex: 1 1 92px;
+        min-height: 34px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        white-space: normal;
+        padding: 6px 8px;
+        line-height: 1.2;
+    }
+
+    #control-dock {
+        top: 124px;
+        left: 10px;
+        right: 10px;
+        width: auto;
+        max-height: calc(100vh - 134px);
+        padding: 14px;
+    }
+
+    .warning-banner {
+        top: 10px;
+        width: calc(100vw - 20px);
+    }
+}
 

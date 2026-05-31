@@ -4,23 +4,41 @@
 from __future__ import annotations
 
 import os
+import threading
 import webbrowser
+from qgis.PyQt.QtCore import QObject, QCoreApplication, QThread, pyqtSignal, pyqtSlot
 from qgis.PyQt.QtGui import QIcon
 from qgis.PyQt.QtWidgets import QAction, QMessageBox
 from qgis.core import (
-    QgsProject,
     QgsVectorLayer,
     QgsJsonExporter,
-    QgsFeature,
     QgsGeometry,
-    QgsPoint,
-    QgsPolygon,
-    QgsLineString,
-    QgsMessageLog
+    QgsPointXY,
 )
 
 from .dialog import PluginDialog
 from .server import PlanXProceduralServer
+
+
+class _SyncBridge(QObject):
+    """Marshal HTTP sync requests from the server thread to QGIS' main thread."""
+
+    request = pyqtSignal(object, object)
+
+    def __init__(self, plugin):
+        super().__init__()
+        self.plugin = plugin
+        self.request.connect(self._handle_request)
+
+    @pyqtSlot(object, object)
+    def _handle_request(self, data, token):
+        try:
+            token["result"] = self.plugin._sync_to_qgis(data)
+        except Exception as exc:
+            token["result"] = (False, f"Sync failed: {exc}")
+        finally:
+            token["event"].set()
+
 
 class PlanXUrbanProcedural3D:
     MENU_NAME = "&PlanX Urban Procedural 3D"
@@ -35,6 +53,7 @@ class PlanXUrbanProcedural3D:
         self.active_layer = None
         self.crs_transformed = False
         self.export_crs = None
+        self.sync_bridge = _SyncBridge(self)
 
     def initGui(self) -> None:
         self.action = QAction(QIcon(self.icon_path), "PlanX Urban Procedural 3D", self.iface.mainWindow())
@@ -150,9 +169,24 @@ class PlanXUrbanProcedural3D:
             webbrowser.open(f"http://127.0.0.1:{port}/index.html")
 
     def sync_callback(self, data: dict) -> tuple[bool, str]:
-        """Callback executed by the server thread when POST /sync is received."""
+        """Server-thread callback for POST /sync."""
+        app = QCoreApplication.instance()
+        if app is None or QThread.currentThread() == app.thread():
+            return self._sync_to_qgis(data)
+
+        token = {"event": threading.Event(), "result": None}
+        self.sync_bridge.request.emit(data, token)
+        if not token["event"].wait(30):
+            return False, "Sync timed out while waiting for QGIS main thread"
+        return token["result"] or (False, "Sync failed without a result")
+
+    def _sync_to_qgis(self, data: dict) -> tuple[bool, str]:
+        """Apply browser-side design updates to the active QGIS layer."""
         if not self.active_layer:
             return False, "QGIS active layer is not set"
+
+        was_editing = self.active_layer.isEditable()
+        edit_command_started = False
 
         try:
             updates = data.get("updates", [])
@@ -192,15 +226,36 @@ class PlanXUrbanProcedural3D:
                     else:
                         fields_to_create.append(QgsField(name, QVariant.String))
             
-            if fields_to_create:
-                self.active_layer.dataProvider().addAttributes(fields_to_create)
+            if fields_to_create and was_editing:
+                for field in fields_to_create:
+                    if not self.active_layer.addAttribute(field):
+                        return False, f"Could not add field '{field.name()}' to editable layer"
+                self.active_layer.updateFields()
+            elif fields_to_create:
+                if not self.active_layer.dataProvider().addAttributes(fields_to_create):
+                    return False, "Could not add required PlanX fields to the layer"
                 self.active_layer.updateFields()
             
-            # Start editing
-            self.active_layer.startEditing()
+            if not self.active_layer.isEditable() and not self.active_layer.startEditing():
+                return False, "Could not start an edit session for the active layer"
+
+            self.active_layer.beginEditCommand("PlanX Urban Procedural 3D sync")
+            edit_command_started = True
+
+            field_indices = {
+                name: self.active_layer.fields().indexOf(name)
+                for name in fields_to_add
+            }
+            missing_fields = [name for name, idx in field_indices.items() if idx < 0]
+            if missing_fields:
+                raise RuntimeError(f"Missing required fields after update: {', '.join(missing_fields)}")
 
             for item in updates:
-                fid = int(item.get("id"))
+                try:
+                    fid = int(item.get("id"))
+                except (TypeError, ValueError):
+                    raise RuntimeError(f"Invalid feature id in sync payload: {item.get('id')!r}")
+
                 far_val = float(item.get("far", 0))
                 bcr_val = float(item.get("bcr", 0))
                 gfa_val = float(item.get("gfa", 0))
@@ -218,29 +273,33 @@ class PlanXUrbanProcedural3D:
                 coords = item.get("coordinates", [])
 
                 # Update attributes
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("far"), far_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("bcr"), bcr_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("gfa"), gfa_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("setback"), setback_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("floors"), floors_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("usage"), usage_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("floor_h"), floor_h_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("typology"), typology_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("max_bcr"), max_bcr_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("max_far"), max_far_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("max_height"), max_height_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("roof_style"), roof_style_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("stepback_i"), stepback_i_val)
-                self.active_layer.changeAttributeValue(fid, self.active_layer.fields().indexOf("stepback_d"), stepback_d_val)
+                values = {
+                    "far": far_val,
+                    "bcr": bcr_val,
+                    "gfa": gfa_val,
+                    "setback": setback_val,
+                    "floors": floors_val,
+                    "usage": usage_val,
+                    "floor_h": floor_h_val,
+                    "typology": typology_val,
+                    "max_bcr": max_bcr_val,
+                    "max_far": max_far_val,
+                    "max_height": max_height_val,
+                    "roof_style": roof_style_val,
+                    "stepback_i": stepback_i_val,
+                    "stepback_d": stepback_d_val,
+                }
+                for name, value in values.items():
+                    if not self.active_layer.changeAttributeValue(fid, field_indices[name], value):
+                        raise RuntimeError(f"Could not update '{name}' for feature {fid}")
 
                 # Optional: Update geometry if coords are sent back (setback footprint)
                 if coords and len(coords) >= 3:
-                    pts = [QgsPoint(pt[0], pt[1]) for pt in coords]
+                    pts = [QgsPointXY(float(pt[0]), float(pt[1])) for pt in coords]
                     # close the ring if not closed
                     if pts[0] != pts[-1]:
                         pts.append(pts[0])
-                    ring = QgsLineString(pts)
-                    poly_geom = QgsGeometry(QgsPolygon(ring))
+                    poly_geom = QgsGeometry.fromPolygonXY([pts])
                     
                     # Re-project back to geographic CRS if we exported in EPSG:3857
                     if self.crs_transformed:
@@ -252,17 +311,29 @@ class PlanXUrbanProcedural3D:
                         )
                         poly_geom.transform(xform)
                         
-                    self.active_layer.changeGeometry(fid, poly_geom)
+                    if not self.active_layer.changeGeometry(fid, poly_geom):
+                        raise RuntimeError(f"Could not update geometry for feature {fid}")
 
-            # Commit changes
-            self.active_layer.commitChanges()
+            self.active_layer.endEditCommand()
+            edit_command_started = False
+
+            if not was_editing and not self.active_layer.commitChanges():
+                errors = "; ".join(self.active_layer.commitErrors())
+                self.active_layer.rollBack()
+                return False, f"Could not commit layer changes: {errors or 'unknown error'}"
+
             # Trigger canvas redraw
             self.active_layer.triggerRepaint()
             self.iface.mapCanvas().refresh()
             
+            if was_editing:
+                return True, f"Synced {len(updates)} features into the active edit session"
             return True, f"Successfully synced {len(updates)} features back to QGIS"
         except Exception as e:
-            self.active_layer.rollBack()
+            if edit_command_started:
+                self.active_layer.destroyEditCommand()
+            if not was_editing and self.active_layer and self.active_layer.isEditable():
+                self.active_layer.rollBack()
             return False, f"Sync failed: {e}"
 
     def _error(self, title: str, text: str) -> None:

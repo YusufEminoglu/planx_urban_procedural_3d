@@ -1,5 +1,12 @@
 # Changelog
 
+## [0.1.10] - 2026-05-31
+
+- Finalize the Hub-ready procedural cockpit on the 0.1 line with hardened QGIS sync threading, edit-session safety, and local server routing.
+- Prevent blank 3D viewports with empty-data fallback scenes, per-feature render fallback safety, and large-extent camera focus.
+- Add inferred roads, roundabouts, crossings, signal hardware, traffic-on-corridor behavior, brighter first-view rendering, responsive UI polish, and refreshed PNG toolbar icon.
+- Keep export/sync metrics consistent across CSV reporting and QGIS attribute updates.
+
 ## [0.4.0] - 2026-05-31
 
 - Implement interactive 3D horizontal Setback dragging handles in viewport
