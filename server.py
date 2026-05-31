@@ -45,7 +45,7 @@ class SyncHTTPRequestHandler(BaseHTTPRequestHandler):
     def do_GET(self):
         # Routing
         url = self.path.split('?')[0]
-        
+
         if url == "/data.geojson":
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -61,9 +61,9 @@ class SyncHTTPRequestHandler(BaseHTTPRequestHandler):
             clean_path = "src/app.js"
         elif clean_path == "style.css":
             clean_path = "src/style.css"
-            
+
         file_path = os.path.join(self.server.web_dir, clean_path)
-        
+
         # Security check: do not escape web_dir.
         real_web_dir = os.path.normcase(os.path.realpath(self.server.web_dir))
         real_file_path = os.path.normcase(os.path.realpath(file_path))

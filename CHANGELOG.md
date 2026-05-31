@@ -1,5 +1,11 @@
 # Changelog
 
+## [0.1.13] - 2026-06-01
+
+- Clean QGIS Hub quality scan warnings for Python style and hidden placeholder files.
+- Remove unused dialog imports and trailing whitespace in Python source files.
+- Keep the 0.1.12 global English UI release behavior unchanged.
+
 ## [0.1.12] - 2026-06-01
 
 - Convert the web cockpit and QGIS launcher to global English-only copy.

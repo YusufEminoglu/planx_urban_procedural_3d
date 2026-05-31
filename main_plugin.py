@@ -96,10 +96,10 @@ class PlanXUrbanProcedural3D:
         # Check Coordinate Reference System (CRS) unit type
         crs = layer.crs()
         crs_is_geographic = crs.isGeographic()
-        
+
         from qgis.core import QgsCoordinateReferenceSystem
         if crs_is_geographic:
-            self.export_crs = QgsCoordinateReferenceSystem("EPSG:3857") # Web Mercator (meters)
+            self.export_crs = QgsCoordinateReferenceSystem("EPSG:3857")  # Web Mercator (meters)
             self.crs_transformed = True
             self.iface.messageBar().pushWarning(
                 "PlanX Urban Procedural 3D",
@@ -112,7 +112,7 @@ class PlanXUrbanProcedural3D:
 
         # Prepare directory paths
         web_dir = os.path.join(self.plugin_dir, "web")
-        
+
         # Verify web directory exists
         if not os.path.exists(web_dir):
             os.makedirs(web_dir, exist_ok=True)
@@ -133,11 +133,11 @@ class PlanXUrbanProcedural3D:
             # Enable coordinate precision and include ID
             exporter.setPrecision(6)
             exporter.setIncludeAttributes(True)
-            exporter.setDestinationCrs(self.export_crs) # Export in export CRS (meters if layer is geographic)
-            
+            exporter.setDestinationCrs(self.export_crs)  # Export in export CRS (meters if layer is geographic)
+
             features = list(layer.getFeatures())
             geojson_str = exporter.exportFeatures(features)
-            
+
             # Inject CRS information so Web UI knows if it is geographic
             try:
                 import json
@@ -210,10 +210,10 @@ class PlanXUrbanProcedural3D:
                 "stepback_i": "integer",
                 "stepback_d": "double"
             }
-            
+
             # Check if fields exist, create them if not (before starting edit session)
             existing_fields = [f.name() for f in self.active_layer.fields()]
-            
+
             from qgis.PyQt.QtCore import QVariant
             fields_to_create = []
             for name, ftype in fields_to_add.items():
@@ -225,7 +225,7 @@ class PlanXUrbanProcedural3D:
                         fields_to_create.append(QgsField(name, QVariant.Int))
                     else:
                         fields_to_create.append(QgsField(name, QVariant.String))
-            
+
             if fields_to_create and was_editing:
                 for field in fields_to_create:
                     if not self.active_layer.addAttribute(field):
@@ -235,7 +235,7 @@ class PlanXUrbanProcedural3D:
                 if not self.active_layer.dataProvider().addAttributes(fields_to_create):
                     return False, "Could not add required PlanX fields to the layer"
                 self.active_layer.updateFields()
-            
+
             if not self.active_layer.isEditable() and not self.active_layer.startEditing():
                 return False, "Could not start an edit session for the active layer"
 
@@ -300,7 +300,7 @@ class PlanXUrbanProcedural3D:
                     if pts[0] != pts[-1]:
                         pts.append(pts[0])
                     poly_geom = QgsGeometry.fromPolygonXY([pts])
-                    
+
                     # Re-project back to geographic CRS if we exported in EPSG:3857
                     if self.crs_transformed:
                         from qgis.core import QgsCoordinateTransform, QgsProject, QgsCoordinateReferenceSystem
@@ -310,7 +310,7 @@ class PlanXUrbanProcedural3D:
                             QgsProject.instance()
                         )
                         poly_geom.transform(xform)
-                        
+
                     if not self.active_layer.changeGeometry(fid, poly_geom):
                         raise RuntimeError(f"Could not update geometry for feature {fid}")
 
@@ -325,7 +325,7 @@ class PlanXUrbanProcedural3D:
             # Trigger canvas redraw
             self.active_layer.triggerRepaint()
             self.iface.mapCanvas().refresh()
-            
+
             if was_editing:
                 return True, f"Synced {len(updates)} features into the active edit session"
             return True, f"Successfully synced {len(updates)} features back to QGIS"

@@ -3,7 +3,7 @@ name=PlanX Urban Procedural 3D
 qgisMinimumVersion=3.28
 qgisMaximumVersion=3.99
 description=Parametric 3D urban design and procedural planning toolbox with real-time compliance feedback.
-version=0.1.12
+version=0.1.13
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
@@ -23,6 +23,7 @@ hasProcessingProvider=no
 license=GPL-3.0-or-later
 
 changelog=
+    PlanX Urban Procedural 3D 0.1.13 - Cleans QGIS Hub quality scan warnings by removing unused imports, whitespace issues, inline comment spacing issues, and hidden placeholder files.
     PlanX Urban Procedural 3D 0.1.12 - Converts the web and QGIS interfaces to global English-only copy, removes localized zoning terminology, and polishes the release cockpit.
     PlanX Urban Procedural 3D 0.1.11 - Brightened the web cockpit, added an embedded quick-start HTML guide, and improved first-view daylight readability.
     PlanX Urban Procedural 3D 0.1.10 - Final Hub-ready procedural cockpit with hardened QGIS sync, safer local server routing, non-blank 3D fallback scenes, large-extent camera focus, inferred roads/roundabouts, responsive UI polish, and refreshed PNG icon.

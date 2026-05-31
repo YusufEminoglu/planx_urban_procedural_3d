@@ -9,9 +9,7 @@ from qgis.PyQt.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFormLayout,
-    QHBoxLayout,
     QLabel,
-    QPushButton,
     QSpinBox,
     QTabWidget,
     QVBoxLayout,
@@ -199,7 +197,7 @@ class PluginDialog(QDialog):
         w = QWidget()
         layout = QVBoxLayout(w)
         layout.setContentsMargins(10, 10, 10, 10)
-        
+
         desc = QLabel(
             "<h3>PlanX Urban Procedural 3D</h3>"
             "<p style='color: #475569; line-height: 1.5;'>Parametric 3D urban design and procedural planning toolbox with real-time BCR/FAR compliance feedback.</p>"
