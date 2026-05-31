@@ -22,12 +22,26 @@ let trafficCars = []; // Array of { carMesh, roadRing, speed, progress }
 let isTimeAnimating = false;
 let timeAnimationId = null;
 
+// Cinematic Tour State
+let isCinematicTour = false;
+
+// 3D Ruler / Measurement Tool State
+let isMeasurementMode = false;
+let measurementPoints = [];
+let tempMeasureLine = null;
+let tempMeasureLabel = null;
+let savedMeasurements = [];
+
 // Height Dragging State
 let heightHandleMesh = null;
 let isDraggingHeight = false;
 let dragStartHeight = 0;
 let dragStartFloors = 0;
 let dragIntersectionPlane = null;
+
+// Setback Dragging State
+let setbackHandleMesh = null;
+let isDraggingSetback = false;
 
 // Light references
 let dirLight, ambientLight;
@@ -42,7 +56,13 @@ const placeholderEl = document.getElementById('selection-placeholder');
 const controlsEl = document.getElementById('editor-controls');
 const btnSync = document.getElementById('btn-sync');
 const btnCapture = document.getElementById('btn-capture');
+const btnExportCsv = document.getElementById('btn-export-csv');
+const btnSolveSelected = document.getElementById('btn-solve-selected');
+const btnSolveCity = document.getElementById('btn-solve-city');
 const btnReload = document.getElementById('btn-reload');
+const btnTour = document.getElementById('btn-tour');
+const btnMeasure = document.getElementById('btn-measure');
+const btnClearMeasure = document.getElementById('hud-btn-clear-measure');
 const crsWarningBannerEl = document.getElementById('crs-warning-banner');
 
 // View settings checkbox controls
@@ -66,6 +86,13 @@ const inMaxFar = document.getElementById('input-max-far');
 const inMaxHeight = document.getElementById('input-max-height');
 const inTime = document.getElementById('input-time');
 const btnPlayTime = document.getElementById('btn-play-time');
+
+// Stepped Tower Controls
+const steppedTowerControlsEl = document.getElementById('stepped-tower-controls');
+const inStepbackInterval = document.getElementById('input-stepback-interval');
+const inStepbackDepth = document.getElementById('input-stepback-depth');
+const lblStepbackInterval = document.getElementById('val-stepback-interval');
+const lblStepbackDepth = document.getElementById('val-stepback-depth');
 
 // Label values
 const lblSetback = document.getElementById('val-setback');
@@ -94,6 +121,11 @@ const farFillEl = document.getElementById('gauge-far-fill');
 const metUnits = document.getElementById('metric-units');
 const metPopulation = document.getElementById('metric-population');
 const metDensity = document.getElementById('metric-density');
+
+// Sustainability Indicators elements
+const metOsr = document.getElementById('metric-osr');
+const metCarbon = document.getElementById('metric-carbon');
+const metRunoff = document.getElementById('metric-runoff');
 
 // Apply All button
 const btnApplyAll = document.getElementById('btn-apply-all');
@@ -196,6 +228,12 @@ function init() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.maxPolarAngle = Math.PI / 2 - 0.02;
+    controls.addEventListener('start', () => {
+        if (isCinematicTour) {
+            isCinematicTour = false;
+            if (btnTour) btnTour.classList.remove('active');
+        }
+    });
 
     // 7. Lighting
     ambientLight = new THREE.AmbientLight(0xffffff, 0.45);
@@ -313,6 +351,16 @@ function init() {
 function animate() {
     requestAnimationFrame(animate);
     
+    // Auto orbit camera for Cinematic Tour
+    if (isCinematicTour) {
+        const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
+        const radius = Math.sqrt(offset.x * offset.x + offset.z * offset.z);
+        let angle = Math.atan2(offset.z, offset.x);
+        angle += 0.002; // slow orbit speed
+        camera.position.x = controls.target.x + radius * Math.cos(angle);
+        camera.position.z = controls.target.z + radius * Math.sin(angle);
+    }
+    
     // Update controls
     controls.update();
 
@@ -329,6 +377,9 @@ function animate() {
             child.material.opacity = 0.2 + Math.abs(Math.sin(timeSec * 2)) * 0.8;
         }
     });
+
+    // Update 3D ruler tool labels screen positions
+    updateMeasurementLabels();
 
     composer.render();
 }
@@ -356,6 +407,9 @@ function setupInputListeners() {
         selectedParcel.params.usage = inUsage.value;
         selectedParcel.params.roofStyle = inRoofStyle.value;
         
+        selectedParcel.params.stepbackInterval = parseInt(inStepbackInterval.value);
+        selectedParcel.params.stepbackDepth = parseFloat(inStepbackDepth.value);
+
         // Zoning limits
         selectedParcel.params.maxBcr = parseFloat(inMaxBcr.value);
         selectedParcel.params.maxFar = parseFloat(inMaxFar.value);
@@ -368,6 +422,16 @@ function setupInputListeners() {
         lblMaxBcr.textContent = selectedParcel.params.maxBcr.toFixed(2);
         lblMaxFar.textContent = selectedParcel.params.maxFar.toFixed(1);
         lblMaxHeight.textContent = selectedParcel.params.maxHeight.toFixed(1);
+        
+        lblStepbackInterval.textContent = selectedParcel.params.stepbackInterval;
+        lblStepbackDepth.textContent = selectedParcel.params.stepbackDepth.toFixed(1);
+
+        // Show/hide stepped tower controls
+        if (selectedParcel.params.typology === 'SteppedTower') {
+            steppedTowerControlsEl.classList.remove('hidden');
+        } else {
+            steppedTowerControlsEl.classList.add('hidden');
+        }
 
         // Rebuild meshes
         rebuildParcel3D(selectedParcel);
@@ -410,6 +474,9 @@ function setupInputListeners() {
     inUsage.addEventListener('change', triggerUpdate);
     inRoofStyle.addEventListener('change', triggerUpdate);
     
+    inStepbackInterval.addEventListener('input', triggerUpdate);
+    inStepbackDepth.addEventListener('input', triggerUpdate);
+    
     // Zoning inputs
     inMaxBcr.addEventListener('input', triggerUpdate);
     inMaxFar.addEventListener('input', triggerUpdate);
@@ -425,6 +492,64 @@ function setupInputListeners() {
 
     btnSync.addEventListener('click', syncToQGIS);
     btnCapture.addEventListener('click', captureViewport);
+    if (btnExportCsv) {
+        btnExportCsv.addEventListener('click', exportPlanningReport);
+    }
+    if (btnSolveSelected) {
+        btnSolveSelected.addEventListener('click', () => {
+            if (selectedParcel) {
+                optimizeParcelZoning(selectedParcel);
+                rebuildParcel3D(selectedParcel);
+                selectParcel(selectedParcel);
+                updateDashboard(selectedParcel);
+            } else {
+                alert("Please select a parcel first.");
+            }
+        });
+    }
+    if (btnSolveCity) {
+        btnSolveCity.addEventListener('click', solveCityLayout);
+    }
+
+    // Cinematic Tour Toggle
+    if (btnTour) {
+        btnTour.addEventListener('click', () => {
+            isCinematicTour = !isCinematicTour;
+            btnTour.classList.toggle('active', isCinematicTour);
+        });
+    }
+
+    // Toggle 3D Ruler / Measurement Mode
+    if (btnMeasure) {
+        btnMeasure.addEventListener('click', () => {
+            isMeasurementMode = !isMeasurementMode;
+            btnMeasure.classList.toggle('active', isMeasurementMode);
+            
+            if (isMeasurementMode) {
+                // De-select active parcel to prevent interference
+                deselectParcel();
+                // Ensure cinematic tour is off
+                if (isCinematicTour) {
+                    isCinematicTour = false;
+                    if (btnTour) btnTour.classList.remove('active');
+                }
+                
+                // Initialize temp lines/labels if they don't exist yet
+                initTemporaryMeasurementAssets();
+            } else {
+                // Disable measurement mode
+                document.body.style.cursor = 'default';
+                if (tempMeasureLine) tempMeasureLine.visible = false;
+                if (tempMeasureLabel) tempMeasureLabel.style.display = 'none';
+                measurementPoints = [];
+            }
+        });
+    }
+
+    // Clear Measurements
+    if (btnClearMeasure) {
+        btnClearMeasure.addEventListener('click', clearAllMeasurements);
+    }
 
     // Reload Data button
     if (btnReload) {
@@ -484,15 +609,15 @@ function updateSolarPhysics(timeVal) {
             skyUniforms.uZenithColor.value.setHex(0x000005);
             skyUniforms.uStarIntensity.value = 0.9;
         } else {
-            skyUniforms.uHorizonColor.value.setHex(0x0a0e27);
-            skyUniforms.uZenithColor.value.setHex(0x020617);
+            skyUniforms.uHorizonColor.value.setHex(0xbae6fd); // Bright sky blue horizon
+            skyUniforms.uZenithColor.value.setHex(0x0ea5e9);  // Rich sky blue zenith
             skyUniforms.uStarIntensity.value = 0.0;
         }
     }
 
     // Update atmospheric fog color to match sky
     if (scene.fog) {
-        scene.fog.color.setHex(isNight ? 0x020208 : 0x0a0e17);
+        scene.fog.color.setHex(isNight ? 0x020208 : 0xf1f5f9); // Clean slate-100 day mist
     }
 
     if (isNight) {
@@ -502,11 +627,11 @@ function updateSolarPhysics(timeVal) {
     } else {
         // Daylight Mode
         ambientLight.color.setHex(0xffffff);
-        ambientLight.intensity = 0.45;
+        ambientLight.intensity = 0.75; // Ambient light increased for high-fidelity visibility
         
         // Solar intensity peaks at noon
         const peakFactor = Math.sin(angle);
-        dirLight.intensity = 0.35 + peakFactor * 0.55;
+        dirLight.intensity = 0.5 + peakFactor * 0.6; // High intensity sun rays
     }
 
     // Update active building emission light and streetlights visibility
@@ -543,6 +668,125 @@ function updateSolarPhysics(timeVal) {
     });
 }
 
+// Mockup GeoJSON for Offline Demo Mode
+const mockupGeoJSON = {
+    type: "FeatureCollection",
+    crs_is_geographic: false,
+    crs: {
+        properties: {
+            name: "EPSG:3857"
+        }
+    },
+    features: [
+        {
+            type: "Feature",
+            id: 1,
+            properties: {
+                fid: 1,
+                setback: 3.0,
+                floors: 6,
+                floor_h: 3.2,
+                typology: "SteppedTower",
+                usage: "MixedUse",
+                roof_style: "Flat",
+                stepback_i: 3,
+                stepback_d: 1.5,
+                max_bcr: 0.5,
+                max_far: 3.0,
+                max_height: 25.0
+            },
+            geometry: {
+                type: "Polygon",
+                coordinates: [[
+                    [-30, -30],
+                    [30, -30],
+                    [30, 30],
+                    [-30, 30],
+                    [-30, -30]
+                ]]
+            }
+        },
+        {
+            type: "Feature",
+            id: 2,
+            properties: {
+                fid: 2,
+                setback: 2.0,
+                floors: 3,
+                floor_h: 3.0,
+                typology: "Courtyard",
+                usage: "Residential",
+                roof_style: "Hipped",
+                max_bcr: 0.4,
+                max_far: 1.5,
+                max_height: 12.0
+            },
+            geometry: {
+                type: "Polygon",
+                coordinates: [[
+                    [50, -50],
+                    [110, -50],
+                    [110, 10],
+                    [50, 10],
+                    [50, -50]
+                ]]
+            }
+        },
+        {
+            type: "Feature",
+            id: 3,
+            properties: {
+                fid: 3,
+                setback: 4.0,
+                floors: 1,
+                floor_h: 3.5,
+                typology: "Tower",
+                usage: "Park",
+                roof_style: "Flat",
+                max_bcr: 0.1,
+                max_far: 0.1,
+                max_height: 4.0
+            },
+            geometry: {
+                type: "Polygon",
+                coordinates: [[
+                    [-110, -50],
+                    [-50, -50],
+                    [-50, 10],
+                    [-110, 10],
+                    [-110, -50]
+                ]]
+            }
+        },
+        {
+            type: "Feature",
+            id: 4,
+            properties: {
+                fid: 4,
+                setback: 3.0,
+                floors: 10,
+                floor_h: 3.0,
+                typology: "Tower",
+                usage: "Commercial",
+                roof_style: "Flat",
+                max_bcr: 0.6,
+                max_far: 5.0,
+                max_height: 35.0
+            },
+            geometry: {
+                type: "Polygon",
+                coordinates: [[
+                    [-30, 50],
+                    [30, 50],
+                    [30, 110],
+                    [-30, 110],
+                    [-30, 50]
+                ]]
+            }
+        }
+    ]
+};
+
 // Fetch exported layer GeoJSON from local Python server
 async function loadGeoJSON() {
     try {
@@ -555,8 +799,24 @@ async function loadGeoJSON() {
         loadingEl.style.opacity = 0;
         setTimeout(() => loadingEl.classList.add('hidden'), 500);
     } catch (e) {
-        console.error(e);
-        document.getElementById('loading-text').innerText = "ERROR: Failed to load layer. Verify QGIS server connection.";
+        console.warn("Could not reach QGIS server, falling back to Demo Mockup layer.", e);
+        
+        // Load mock dataset
+        parseGeoJSON(mockupGeoJSON);
+        
+        // Show offline warning banner after parseGeoJSON to prevent it from hiding it
+        if (crsWarningBannerEl) {
+            crsWarningBannerEl.className = 'warning-banner';
+            crsWarningBannerEl.style.background = 'linear-gradient(135deg, #d97706, #b45309)';
+            crsWarningBannerEl.classList.remove('hidden');
+            const warningText = crsWarningBannerEl.querySelector('.warning-text');
+            if (warningText) {
+                warningText.innerHTML = '<strong>Offline Demo Mode:</strong> Loaded procedural mockup parcels. Start the plugin server in QGIS to connect live.';
+            }
+        }
+        
+        loadingEl.style.opacity = 0;
+        setTimeout(() => loadingEl.classList.add('hidden'), 500);
     }
 }
 
@@ -592,7 +852,9 @@ function parseGeoJSON(data) {
     hudTotalParcels.textContent = data.features.length;
     if (data.crs && data.crs.properties && data.crs.properties.name) {
         const crsName = data.crs.properties.name.split("::").pop();
-        hudCrs.textContent = crsName;
+        if (hudCrs) {
+            hudCrs.textContent = crsName;
+        }
     }
 
     // 1. Calculate bounding box center
@@ -645,6 +907,8 @@ function parseGeoJSON(data) {
             typology: props.typology !== undefined ? props.typology : 'Tower',
             usage: props.usage !== undefined ? props.usage : 'Residential',
             roofStyle: props.roof_style !== undefined ? props.roof_style : (props.usage === 'Residential' ? 'Hipped' : 'Flat'),
+            stepbackInterval: props.stepback_i !== undefined ? parseInt(props.stepback_i) : 4,
+            stepbackDepth: props.stepback_d !== undefined ? parseFloat(props.stepback_d) : 1.5,
             // Zoning constraints
             maxBcr: props.max_bcr !== undefined ? parseFloat(props.max_bcr) : 0.45,
             maxFar: props.max_far !== undefined ? parseFloat(props.max_far) : 2.5,
@@ -680,6 +944,23 @@ function parseGeoJSON(data) {
     camera.position.set(0, maxDim * 0.8, maxDim * 1.2);
     controls.target.set(0, 0, 0);
     controls.update();
+}
+
+// Dynamic color updates for parcel grounds representing zoning compliance
+function updateParcelGroundColor(item, hasViolation) {
+    if (!item.parcelMesh || !item.parcelMesh.material) return;
+    
+    let colorHex = 0x1e293b; // default unselected compliant slate grey
+    
+    if (item.params.usage === 'Park') {
+        colorHex = 0x064e3b; // soft forest green for public parks
+    } else if (selectedParcel === item) {
+        colorHex = hasViolation ? 0xb91c1c : 0x0d9488; // active selection: bright red vs bright teal
+    } else {
+        colorHex = hasViolation ? 0x450a0a : 0x1e293b; // inactive: dark burgundy vs default slate
+    }
+    
+    item.parcelMesh.material.color.setHex(colorHex);
 }
 
 // Render parcel boundary lines and ground surface
@@ -871,6 +1152,9 @@ function rebuildParcel3D(item) {
     sbLine.computeLineDistances();
     scene.add(sbLine);
     item.setbackMesh = sbLine;
+
+    const buildingGroup = new THREE.Group();
+    buildingGroup.userData = { parcelItem: item };
 
     // Calculate footprint area and construct shape/geometry
     let footprintArea = 0;
@@ -1074,8 +1358,7 @@ function rebuildParcel3D(item) {
         group.userData = { parcelItem: item };
         group.add(podiumMesh);
         if (towerMesh) group.add(towerMesh);
-        scene.add(group);
-        item.buildingMesh = group;
+        buildingGroup.add(group);
 
         // Add roof details on top based on roof style selection
         const topMesh = towerMesh || podiumMesh;
@@ -1091,6 +1374,398 @@ function rebuildParcel3D(item) {
         }
 
         footprintPoints = towerRing; // for compliance envelope
+    } else if (typology === 'SteppedTower') {
+        const group = new THREE.Group();
+        group.userData = { parcelItem: item };
+
+        const stepInterval = item.params.stepbackInterval || 4;
+        const stepDepth = item.params.stepbackDepth || 1.5;
+
+        let baseHeight = 0;
+        let remainingFloors = floors;
+        let segmentIndex = 0;
+        let lastRing = insetRing;
+        let lastHeight = 0;
+        let topMesh = null;
+
+        footprintArea = calculatePolygonArea(insetRing);
+        gfa = 0;
+
+        while (remainingFloors > 0) {
+            const currentSetback = setback + segmentIndex * stepDepth;
+            const segmentRing = offsetPolygonRing(item.outerRing, currentSetback);
+            
+            if (!segmentRing || segmentRing.length < 3) {
+                break;
+            }
+
+            lastRing = segmentRing;
+
+            const segFloors = Math.min(stepInterval, remainingFloors);
+            const segHeight = segFloors * floorH;
+            const segArea = calculatePolygonArea(segmentRing);
+            gfa += segArea * segFloors;
+
+            const segShape = new THREE.Shape();
+            segmentRing.forEach((pt, i) => {
+                if (i === 0) segShape.moveTo(pt.x, pt.y);
+                else segShape.lineTo(pt.x, pt.y);
+            });
+
+            const segGeom = new THREE.ExtrudeGeometry(segShape, { depth: segHeight, bevelEnabled: false });
+            segGeom.rotateX(-Math.PI / 2);
+            segGeom.translate(0, baseHeight + segHeight, 0);
+
+            const mats = getBuildingMaterials(usage, segFloors);
+            const segMesh = new THREE.Mesh(segGeom, mats);
+            segMesh.castShadow = true;
+            segMesh.receiveShadow = true;
+
+            group.add(segMesh);
+            topMesh = segMesh;
+
+            baseHeight += segHeight;
+            lastHeight = baseHeight;
+            remainingFloors -= segFloors;
+            segmentIndex++;
+        }
+
+        buildingGroup.add(group);
+
+        // Add roof details on top based on roof style selection
+        if (topMesh && lastRing) {
+            const roofStyle = item.params.roofStyle || 'Flat';
+            if (roofStyle === 'Hipped') {
+                buildHippedRoof(topMesh, lastRing, lastHeight);
+            } else if (roofStyle === 'Gable') {
+                buildGableRoof(topMesh, lastRing, lastHeight);
+            } else if (roofStyle === 'Mansard') {
+                buildMansardRoof(topMesh, lastRing, lastHeight);
+            } else {
+                addRooftopDetails(topMesh, lastRing, lastHeight, usage);
+            }
+        }
+
+        footprintPoints = lastRing; // for compliance envelope
+    } else if (typology === 'MultiBuildingBlock') {
+        const group = new THREE.Group();
+        group.userData = { parcelItem: item };
+
+        const ob = getOrientedBounds(insetRing);
+        const W = ob.W;
+
+        const localRing = insetRing.map(pt => {
+            const rx = pt.x - ob.cx;
+            const ry = pt.y - ob.cy;
+            return {
+                x: rx * ob.ux + ry * ob.uy,
+                y: rx * ob.nx + ry * ob.ny
+            };
+        });
+
+        const floorsA = Math.round(floors * 1.3);
+        const floorsB = Math.round(floors * 0.7);
+        const heightA = floorsA * floorH;
+        const heightB = floorsB * floorH;
+
+        footprintArea = 0;
+        gfa = 0;
+
+        let insetPoly1 = null;
+        let insetPoly3 = null;
+
+        if (W >= 40) {
+            const localPoly1 = clipConvexPolygonVertical(localRing, ob.minX, ob.minX + W * 0.38);
+            const localPoly2 = clipConvexPolygonVertical(localRing, ob.minX + W * 0.38, ob.minX + W * 0.62);
+            const localPoly3 = clipConvexPolygonVertical(localRing, ob.minX + W * 0.62, ob.maxX);
+
+            if (localPoly1 && localPoly1.length >= 3) {
+                const globalPoly1 = localPoly1.map(pt => ({
+                    x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                    y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                }));
+                insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                if (insetPoly1 && insetPoly1.length >= 3) {
+                    const a1 = calculatePolygonArea(insetPoly1);
+                    footprintArea += a1;
+                    gfa += a1 * floorsA;
+
+                    const shapeA = new THREE.Shape();
+                    insetPoly1.forEach((pt, i) => {
+                        if (i === 0) shapeA.moveTo(pt.x, pt.y);
+                        else shapeA.lineTo(pt.x, pt.y);
+                    });
+                    const geomA = new THREE.ExtrudeGeometry(shapeA, { depth: heightA, bevelEnabled: false });
+                    geomA.rotateX(-Math.PI / 2);
+                    geomA.translate(0, heightA, 0);
+
+                    const matsA = getBuildingMaterials(usage, floorsA);
+                    const meshA = new THREE.Mesh(geomA, matsA);
+                    meshA.castShadow = true;
+                    meshA.receiveShadow = true;
+                    meshA.userData = { parcelItem: item };
+                    group.add(meshA);
+
+                    addRooftopDetails(meshA, insetPoly1, heightA, usage);
+                    addBuildingBalconies(group, insetPoly1, floorsA, floorH);
+                }
+            }
+
+            if (localPoly2 && localPoly2.length >= 3) {
+                const globalPoly2 = localPoly2.map(pt => ({
+                    x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                    y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                }));
+
+                const shapeP = new THREE.Shape();
+                globalPoly2.forEach((pt, i) => {
+                    if (i === 0) shapeP.moveTo(pt.x, pt.y);
+                    else shapeP.lineTo(pt.x, pt.y);
+                });
+                const geomP = new THREE.ExtrudeGeometry(shapeP, { depth: 0.05, bevelEnabled: false });
+                geomP.rotateX(-Math.PI / 2);
+                geomP.translate(0, 0.03, 0);
+
+                const matP = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.8 });
+                const meshP = new THREE.Mesh(geomP, matP);
+                meshP.receiveShadow = true;
+                group.add(meshP);
+
+                let px = 0, py = 0;
+                globalPoly2.forEach(pt => { px += pt.x; py += pt.y; });
+                px /= globalPoly2.length;
+                py /= globalPoly2.length;
+
+                const fountainGroup = new THREE.Group();
+                fountainGroup.position.set(px, 0.06, -py);
+
+                const rimGeom = new THREE.TorusGeometry(3.5, 0.4, 8, 16);
+                rimGeom.rotateX(Math.PI / 2);
+                const rimMat = new THREE.MeshStandardMaterial({ color: 0x64748b, roughness: 0.5 });
+                const rimMesh = new THREE.Mesh(rimGeom, rimMat);
+                rimMesh.castShadow = true;
+                rimMesh.receiveShadow = true;
+                fountainGroup.add(rimMesh);
+
+                const waterGeom = new THREE.CylinderGeometry(3.3, 3.3, 0.1, 16);
+                const waterMat = new THREE.MeshStandardMaterial({
+                    color: 0x38bdf8,
+                    metalness: 0.9,
+                    roughness: 0.1,
+                    transparent: true,
+                    opacity: 0.8
+                });
+                const waterMesh = new THREE.Mesh(waterGeom, waterMat);
+                waterMesh.position.y = 0.1;
+                fountainGroup.add(waterMesh);
+
+                const jetGeom = new THREE.CylinderGeometry(0.05, 0.15, 1.8, 8);
+                const jetMat = new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.7 });
+                const jet = new THREE.Mesh(jetGeom, jetMat);
+                jet.position.y = 0.9;
+                fountainGroup.add(jet);
+
+                group.add(fountainGroup);
+
+                const benchGeom = new THREE.BoxGeometry(1.6, 0.3, 0.4);
+                const benchMat = new THREE.MeshStandardMaterial({ color: 0x7c2d12, roughness: 0.6 });
+                const legGeom = new THREE.BoxGeometry(0.15, 0.3, 0.4);
+                const legMat = new THREE.MeshStandardMaterial({ color: 0x334155, metalness: 0.8 });
+
+                const benchOffsets = [
+                    { dx: -4.8, dz: 0, rot: Math.PI / 2 },
+                    { dx: 4.8, dz: 0, rot: -Math.PI / 2 },
+                    { dx: 0, dz: 4.8, rot: 0 }
+                ];
+                benchOffsets.forEach(offset => {
+                    const bench = new THREE.Group();
+                    bench.position.set(px + offset.dx, 0.05, -py + offset.dz);
+                    bench.rotation.y = offset.rot;
+                    
+                    const seat = new THREE.Mesh(benchGeom, benchMat);
+                    seat.position.y = 0.15;
+                    seat.castShadow = true;
+                    bench.add(seat);
+
+                    const l1 = new THREE.Mesh(legGeom, legMat);
+                    l1.position.set(-0.7, 0, 0);
+                    bench.add(l1);
+
+                    const l2 = new THREE.Mesh(legGeom, legMat);
+                    l2.position.set(0.7, 0, 0);
+                    bench.add(l2);
+
+                    group.add(bench);
+                });
+
+                const treePositions = [
+                    { dx: -3, dz: -7 },
+                    { dx: 3, dz: -7 },
+                    { dx: -7, dz: 3 },
+                    { dx: 7, dz: 3 }
+                ];
+                treePositions.forEach(tPos => {
+                    const t = buildLowPolyTree(px + tPos.dx, 0.06, -py + tPos.dz, 4.5 + Math.random() * 1.5, 'deciduous');
+                    group.add(t);
+                });
+
+                const pL = new THREE.Group();
+                pL.position.set(px + 4, 0.06, -py - 6);
+                pL.rotation.y = Math.PI / 6;
+
+                const stripeMat = new THREE.MeshBasicMaterial({ color: 0xffffff });
+                const stripeGeom = new THREE.BoxGeometry(0.1, 0.01, 3.5);
+                for (let k = -1.5; k <= 1.5; k += 1.5) {
+                    const stripe = new THREE.Mesh(stripeGeom, stripeMat);
+                    stripe.position.set(k * 2.2, 0.01, 0);
+                    pL.add(stripe);
+                }
+
+                const colors = [0xd97706, 0x2563eb, 0xdc2626];
+                for (let cIdx = 0; cIdx < 2; cIdx++) {
+                    const carMesh = buildDetailedCar(colors[cIdx % colors.length], 1.0);
+                    carMesh.position.set((-0.75 + cIdx * 1.5) * 2.2, 0.35, 0);
+                    carMesh.rotation.y = Math.PI / 2;
+                    pL.add(carMesh);
+                }
+                group.add(pL);
+            }
+
+            if (localPoly3 && localPoly3.length >= 3) {
+                const globalPoly3 = localPoly3.map(pt => ({
+                    x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                    y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                }));
+                insetPoly3 = offsetPolygonRing(globalPoly3, 1.2);
+                if (insetPoly3 && insetPoly3.length >= 3) {
+                    const a3 = calculatePolygonArea(insetPoly3);
+                    footprintArea += a3;
+                    gfa += a3 * floorsB;
+
+                    const shapeB = new THREE.Shape();
+                    insetPoly3.forEach((pt, i) => {
+                        if (i === 0) shapeB.moveTo(pt.x, pt.y);
+                        else shapeB.lineTo(pt.x, pt.y);
+                    });
+                    const geomB = new THREE.ExtrudeGeometry(shapeB, { depth: heightB, bevelEnabled: false });
+                    geomB.rotateX(-Math.PI / 2);
+                    geomB.translate(0, heightB, 0);
+
+                    const matsB = getBuildingMaterials('Residential', floorsB);
+                    const meshB = new THREE.Mesh(geomB, matsB);
+                    meshB.castShadow = true;
+                    meshB.receiveShadow = true;
+                    meshB.userData = { parcelItem: item };
+                    group.add(meshB);
+
+                    buildGableRoof(meshB, insetPoly3, heightB);
+                    addBuildingBalconies(group, insetPoly3, floorsB, floorH);
+                }
+            }
+
+            footprintPoints = insetPoly1 || insetPoly3 || insetRing;
+        } else {
+            const localPoly1 = clipConvexPolygonVertical(localRing, ob.minX, ob.minX + W * 0.5);
+            const localPoly2 = clipConvexPolygonVertical(localRing, ob.minX + W * 0.5, ob.maxX);
+
+            if (localPoly1 && localPoly1.length >= 3) {
+                const globalPoly1 = localPoly1.map(pt => ({
+                    x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                    y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                }));
+                insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                if (insetPoly1 && insetPoly1.length >= 3) {
+                    const a1 = calculatePolygonArea(insetPoly1);
+                    footprintArea += a1;
+                    gfa += a1 * floors;
+
+                    const shapeA = new THREE.Shape();
+                    insetPoly1.forEach((pt, i) => {
+                        if (i === 0) shapeA.moveTo(pt.x, pt.y);
+                        else shapeA.lineTo(pt.x, pt.y);
+                    });
+                    const geomA = new THREE.ExtrudeGeometry(shapeA, { depth: height, bevelEnabled: false });
+                    geomA.rotateX(-Math.PI / 2);
+                    geomA.translate(0, height, 0);
+
+                    const matsA = getBuildingMaterials(usage, floors);
+                    const meshA = new THREE.Mesh(geomA, matsA);
+                    meshA.castShadow = true;
+                    meshA.receiveShadow = true;
+                    meshA.userData = { parcelItem: item };
+                    group.add(meshA);
+
+                    const roofStyle = item.params.roofStyle || 'Flat';
+                    if (roofStyle === 'Hipped') {
+                        buildHippedRoof(meshA, insetPoly1, height);
+                    } else if (roofStyle === 'Gable') {
+                        buildGableRoof(meshA, insetPoly1, height);
+                    } else if (roofStyle === 'Mansard') {
+                        buildMansardRoof(meshA, insetPoly1, height);
+                    } else {
+                        addRooftopDetails(meshA, insetPoly1, height, usage);
+                    }
+
+                    addBuildingBalconies(group, insetPoly1, floors, floorH);
+                }
+            }
+
+            if (localPoly2 && localPoly2.length >= 3) {
+                const globalPoly2 = localPoly2.map(pt => ({
+                    x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                    y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                }));
+
+                const shapeP = new THREE.Shape();
+                globalPoly2.forEach((pt, i) => {
+                    if (i === 0) shapeP.moveTo(pt.x, pt.y);
+                    else shapeP.lineTo(pt.x, pt.y);
+                });
+                const geomP = new THREE.ExtrudeGeometry(shapeP, { depth: 0.05, bevelEnabled: false });
+                geomP.rotateX(-Math.PI / 2);
+                geomP.translate(0, 0.03, 0);
+
+                const matP = new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.95 });
+                const meshP = new THREE.Mesh(geomP, matP);
+                meshP.receiveShadow = true;
+                group.add(meshP);
+
+                let px = 0, py = 0;
+                globalPoly2.forEach(pt => { px += pt.x; py += pt.y; });
+                px /= globalPoly2.length;
+                py /= globalPoly2.length;
+
+                const pathGeom = new THREE.BoxGeometry(4.5, 0.02, 1.2);
+                const pathMat = new THREE.MeshStandardMaterial({ color: 0xd4d4d8, roughness: 0.8 });
+                const path = new THREE.Mesh(pathGeom, pathMat);
+                path.position.set(px, 0.09, -py);
+                group.add(path);
+
+                const bench = new THREE.Group();
+                bench.position.set(px, 0.05, -py + 1.2);
+                const seat = new THREE.Mesh(new THREE.BoxGeometry(1.5, 0.3, 0.4), new THREE.MeshStandardMaterial({ color: 0x78350f }));
+                seat.position.y = 0.15;
+                bench.add(seat);
+                group.add(bench);
+
+                const carStripe = new THREE.Group();
+                carStripe.position.set(px + 4, 0.06, -py - 4);
+                carStripe.rotation.y = Math.PI / 4;
+                const parkedCar = buildDetailedCar(0x0ea5e9, 1.0);
+                parkedCar.position.set(0, 0.35, 0);
+                carStripe.add(parkedCar);
+                group.add(carStripe);
+
+                for (let k = 0; k < 4; k++) {
+                    const tree = buildLowPolyTree(px - 3 + Math.random() * 6, 0.06, -py - 3 + Math.random() * 6, 4 + Math.random() * 2);
+                    group.add(tree);
+                }
+            }
+
+            footprintPoints = insetPoly1 || insetRing;
+        }
+
+        buildingGroup.add(group);
     } else { // Tower
         footprintArea = calculatePolygonArea(insetRing);
         gfa = footprintArea * floors;
@@ -1107,15 +1782,13 @@ function rebuildParcel3D(item) {
         footprintPoints = insetRing;
     }
 
-    // Standard single-mesh building construction (except PodiumTower which exits/adds directly)
-    if (typology !== 'PodiumTower') {
+    if (typology !== 'PodiumTower' && typology !== 'MultiBuildingBlock') {
         const mats = getBuildingMaterials(usage, floors);
         bldMesh = new THREE.Mesh(bldGeom, mats);
         bldMesh.castShadow = true;
         bldMesh.receiveShadow = true;
         bldMesh.userData = { parcelItem: item };
-        scene.add(bldMesh);
-        item.buildingMesh = bldMesh;
+        buildingGroup.add(bldMesh);
 
         // Add Rooftop based on Roof Style parameter
         const roofStyle = item.params.roofStyle || 'Flat';
@@ -1163,6 +1836,20 @@ function rebuildParcel3D(item) {
         }
     }
 
+    if (usage !== 'Park') {
+        // Add balconies to standard building typologies
+        if (typology !== 'PodiumTower' && typology !== 'SteppedTower' && typology !== 'MultiBuildingBlock') {
+            addBuildingBalconies(buildingGroup, insetRing, floors, floorH);
+        }
+
+        const lawn = buildSetbackLawn(item, insetRing);
+        if (lawn) buildingGroup.add(lawn);
+        addSidewalkTreesAndAssets(buildingGroup, item, insetRing);
+
+        scene.add(buildingGroup);
+        item.buildingMesh = buildingGroup;
+    }
+
     const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
     const far = item.area > 0 ? (gfa / item.area) : 0;
 
@@ -1174,6 +1861,9 @@ function rebuildParcel3D(item) {
 
     // 3. Build Zoning Envelope
     buildZoningEnvelope(item, insetRing, item.params.maxHeight, hasViolation);
+
+    // Update ground color dynamically matching compliance status
+    updateParcelGroundColor(item, hasViolation);
 }
 
 // ───────────────────────── Low Poly Procedural Vegetation ─────────────────────────
@@ -1629,14 +2319,30 @@ function createFacadeTextures(wallColor, usage, floors) {
                 ctx.lineTo(x + winW, y + winH / 2);
                 ctx.stroke();
 
-                const isLit = Math.random() < 0.45;
+                const isLit = Math.random() < 0.48;
                 if (isLit) {
-                    const litColor = (isCommercial || isMixedUse) ? '#93c5fd' : '#fef08a';
-                    const emColor = (isCommercial || isMixedUse) ? '#60a5fa' : '#fef08a';
+                    const colorChoices = [
+                        { lit: '#fef08a', em: '#eab308' }, // warm gold
+                        { lit: '#ffedd5', em: '#f97316' }, // amber/orange
+                        { lit: '#e0f2fe', em: '#0ea5e9' }, // cool blue
+                        { lit: '#ccfbf1', em: '#0d9488' }  // soft teal
+                    ];
                     
-                    ctx.fillStyle = litColor;
+                    let idx = 0;
+                    const rand = Math.random();
+                    if (isCommercial) {
+                        idx = rand < 0.5 ? 2 : (rand < 0.8 ? 3 : (rand < 0.9 ? 1 : 0));
+                    } else if (usage === 'Residential') {
+                        idx = rand < 0.5 ? 0 : (rand < 0.8 ? 1 : (rand < 0.9 ? 2 : 3));
+                    } else {
+                        idx = Math.floor(rand * 4);
+                    }
+                    
+                    const choice = colorChoices[idx];
+                    
+                    ctx.fillStyle = choice.lit;
                     ctx.fillRect(x + 2, y + 2, winW - 4, winH - 4);
-                    emCtx.fillStyle = emColor;
+                    emCtx.fillStyle = choice.em;
                     emCtx.fillRect(x + 2, y + 2, winW - 4, winH - 4);
                 }
             }
@@ -1917,11 +2623,11 @@ function buildZoningEnvelope(item, insetRing, maxHeight, isViolated) {
     envGeom.rotateX(-Math.PI / 2);
     envGeom.translate(0, maxHeight, 0);
 
-    const envColor = isViolated ? 0xef4444 : 0x10b981;
+    const envColor = isViolated ? 0xef4444 : 0x06b6d4; // Holographic cyan glow for compliance
     const envMat = new THREE.MeshStandardMaterial({
         color: envColor,
         transparent: true,
-        opacity: isViolated ? 0.25 : 0.08,
+        opacity: isViolated ? 0.22 : 0.05,
         side: THREE.DoubleSide,
         depthWrite: false
     });
@@ -1933,12 +2639,32 @@ function buildZoningEnvelope(item, insetRing, maxHeight, isViolated) {
     const edges = new THREE.EdgesGeometry(envGeom);
     const lineMat = new THREE.LineBasicMaterial({
         color: envColor,
-        linewidth: 1.5,
+        linewidth: 2.0,
         transparent: true,
-        opacity: isViolated ? 0.7 : 0.35
+        opacity: isViolated ? 0.8 : 0.45
     });
     const line = new THREE.LineSegments(edges, lineMat);
     envMesh.add(line);
+
+    // Add dashed vertical column tracks at each corner of the zoning volume
+    const colMat = new THREE.LineDashedMaterial({
+        color: envColor,
+        dashSize: 1.2,
+        gapSize: 0.8,
+        transparent: true,
+        opacity: isViolated ? 0.85 : 0.55
+    });
+
+    insetRing.forEach(pt => {
+        const points = [
+            new THREE.Vector3(pt.x, 0.05, -pt.y),
+            new THREE.Vector3(pt.x, maxHeight, -pt.y)
+        ];
+        const colGeom = new THREE.BufferGeometry().setFromPoints(points);
+        const colLine = new THREE.Line(colGeom, colMat);
+        colLine.computeLineDistances();
+        envMesh.add(colLine);
+    });
 }
 
 // Draw a red guideline if setback is too large to fit a building footprint
@@ -1969,40 +2695,8 @@ function generateTrafficCars() {
         const colors = [0xef4444, 0x3b82f6, 0xf59e0b, 0x10b981];
         
         for (let i = 0; i < 2; i++) {
-            const carGeom = new THREE.BoxGeometry(3.5, 1.4, 1.8);
             const carColor = colors[Math.floor(Math.random() * colors.length)];
-            const carMat = new THREE.MeshStandardMaterial({ color: carColor, roughness: 0.5 });
-            const carMesh = new THREE.Mesh(carGeom, carMat);
-            carMesh.castShadow = true;
-
-            // Simple cabin top
-            const cabinGeom = new THREE.BoxGeometry(2, 0.8, 1.6);
-            const cabinMat = new THREE.MeshStandardMaterial({ color: 0x18181b });
-            const cabin = new THREE.Mesh(cabinGeom, cabinMat);
-            cabin.position.set(-0.3, 1.0, 0);
-            carMesh.add(cabin);
-
-            // Front headlights (glowing spheres)
-            const headlightGeom = new THREE.SphereGeometry(0.2, 8, 8);
-            const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
-            for (let s = -1; s <= 1; s += 2) {
-                const headlight = new THREE.Mesh(headlightGeom, headlightMat);
-                headlight.position.set(1.76, -0.2, s * 0.6);
-                headlight.userData = { isHeadlight: true };
-                headlight.visible = false; // off by default (daylight)
-                carMesh.add(headlight);
-            }
-
-            // Rear brake taillights (red spheres)
-            const taillightMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
-            for (let s = -1; s <= 1; s += 2) {
-                const taillight = new THREE.Mesh(headlightGeom, taillightMat);
-                taillight.position.set(-1.76, -0.2, s * 0.6);
-                taillight.userData = { isTaillight: true };
-                taillight.visible = false;
-                carMesh.add(taillight);
-            }
-
+            const carMesh = buildDetailedCar(carColor, 1.35);
             scene.add(carMesh);
 
             trafficCars.push({
@@ -2036,7 +2730,7 @@ function updateTraffic() {
         const x = pt1.x + (pt2.x - pt1.x) * segmentProgress;
         const z = - (pt1.y + (pt2.y - pt1.y) * segmentProgress);
 
-        car.carMesh.position.set(x, 0.65, z); // lift off ground
+        car.carMesh.position.set(x, 0.05, z);
 
         // Calculate heading rotation
         const dx = pt2.x - pt1.x;
@@ -2067,8 +2761,30 @@ function onDocumentClick(event) {
 
     raycaster.setFromCamera(mouse, camera);
 
+    // Intercept click if in 3D Ruler Measurement mode
+    if (isMeasurementMode) {
+        const allIntersects = raycaster.intersectObjects(scene.children, true);
+        const filtered = allIntersects.filter(hit => {
+            return hit.object.type === 'Mesh' && 
+                   !hit.object.userData?.isHeightHandle && 
+                   !hit.object.userData?.isSetbackHandle && 
+                   !hit.object.userData?.isMeasurementElement;
+        });
+
+        if (filtered.length > 0) {
+            const hitPoint = filtered[0].point;
+            handleMeasurementClick(hitPoint);
+        }
+        return;
+    }
+
     if (heightHandleMesh) {
         const handleIntersects = raycaster.intersectObject(heightHandleMesh, true);
+        if (handleIntersects.length > 0) return;
+    }
+
+    if (setbackHandleMesh) {
+        const handleIntersects = raycaster.intersectObject(setbackHandleMesh, true);
         if (handleIntersects.length > 0) return;
     }
 
@@ -2108,6 +2824,9 @@ function selectParcel(item) {
     inUsage.value = item.params.usage;
     inRoofStyle.value = item.params.roofStyle || 'Flat';
     
+    inStepbackInterval.value = item.params.stepbackInterval || 4;
+    inStepbackDepth.value = item.params.stepbackDepth || 1.5;
+    
     // Zoning sliders
     inMaxBcr.value = item.params.maxBcr;
     inMaxFar.value = item.params.maxFar;
@@ -2120,6 +2839,16 @@ function selectParcel(item) {
     lblMaxBcr.textContent = item.params.maxBcr.toFixed(2);
     lblMaxFar.textContent = item.params.maxFar.toFixed(1);
     lblMaxHeight.textContent = item.params.maxHeight.toFixed(1);
+    
+    lblStepbackInterval.textContent = item.params.stepbackInterval || 4;
+    lblStepbackDepth.textContent = (item.params.stepbackDepth || 1.5).toFixed(1);
+
+    // Show/hide stepped tower controls
+    if (item.params.typology === 'SteppedTower') {
+        steppedTowerControlsEl.classList.remove('hidden');
+    } else {
+        steppedTowerControlsEl.classList.add('hidden');
+    }
 
     metFid.textContent = item.fid;
     metArea.textContent = Math.round(item.area).toLocaleString() + " m²";
@@ -2129,7 +2858,7 @@ function selectParcel(item) {
 
     updateDashboard(item);
 
-    // Spawn 3D arrow height handle on top of building
+    // Spawn 3D arrow height handle on top of building and setback handle on ground
     if (item.params.usage !== 'Park') {
         let cx = 0, cy = 0;
         const ring = item.outerRing;
@@ -2139,18 +2868,32 @@ function selectParcel(item) {
 
         const height = item.params.floors * item.params.floorHeight;
         spawnHeightHandle(cx, cy, height);
+
+        // Spawn setback handle on first segment midpoint
+        const insetRing = offsetPolygonRing(item.outerRing, item.params.setback);
+        if (insetRing && insetRing.length >= 2) {
+            const pt1 = insetRing[0];
+            const pt2 = insetRing[1];
+            spawnSetbackHandle((pt1.x + pt2.x) / 2, (pt1.y + pt2.y) / 2);
+        } else {
+            removeSetbackHandle();
+        }
     } else {
         removeHeightHandle();
+        removeSetbackHandle();
     }
 }
 
 // Deselect selected parcel and hide controls panel
 function deselectParcel() {
     if (selectedParcel) {
-        setBuildingHighlight(selectedParcel.buildingMesh, false);
+        const prevSelected = selectedParcel;
+        setBuildingHighlight(prevSelected.buildingMesh, false);
+        selectedParcel = null;
+        removeHeightHandle();
+        removeSetbackHandle();
+        rebuildParcel3D(prevSelected);
     }
-    selectedParcel = null;
-    removeHeightHandle();
 
     placeholderEl.classList.remove('hidden');
     controlsEl.classList.add('hidden');
@@ -2223,6 +2966,85 @@ function updateDashboard(item) {
             const towerFloors = Math.round(towerH / item.params.floorHeight);
             footprintArea = podiumArea;
             gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
+        } else if (item.params.typology === 'SteppedTower') {
+            const stepInterval = item.params.stepbackInterval || 4;
+            const stepDepth = item.params.stepbackDepth || 1.5;
+            let remainingFloors = floors;
+            let segmentIndex = 0;
+            footprintArea = calculatePolygonArea(insetRing);
+            gfa = 0;
+            while (remainingFloors > 0) {
+                const currentSetback = setback + segmentIndex * stepDepth;
+                const segmentRing = offsetPolygonRing(item.outerRing, currentSetback);
+                if (!segmentRing || segmentRing.length < 3) break;
+                const segFloors = Math.min(stepInterval, remainingFloors);
+                const segArea = calculatePolygonArea(segmentRing);
+                gfa += segArea * segFloors;
+                remainingFloors -= segFloors;
+                segmentIndex++;
+            }
+        } else if (item.params.typology === 'MultiBuildingBlock') {
+            const ob = getOrientedBounds(insetRing);
+            const W = ob.W;
+            const localRing = insetRing.map(pt => {
+                const rx = pt.x - ob.cx;
+                const ry = pt.y - ob.cy;
+                return {
+                    x: rx * ob.ux + ry * ob.uy,
+                    y: rx * ob.nx + ry * ob.ny
+                };
+            });
+            let footArea = 0;
+            let totalGfa = 0;
+            const floorsA = Math.round(floors * 1.3);
+            const floorsB = Math.round(floors * 0.7);
+            if (W >= 40) {
+                const localPoly1 = clipConvexPolygonVertical(localRing, ob.minX, ob.minX + W * 0.38);
+                const localPoly3 = clipConvexPolygonVertical(localRing, ob.minX + W * 0.62, ob.maxX);
+                let insetPoly1 = null;
+                let insetPoly3 = null;
+                if (localPoly1 && localPoly1.length >= 3) {
+                    const globalPoly1 = localPoly1.map(pt => ({
+                        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                    }));
+                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                }
+                if (localPoly3 && localPoly3.length >= 3) {
+                    const globalPoly3 = localPoly3.map(pt => ({
+                        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                    }));
+                    insetPoly3 = offsetPolygonRing(globalPoly3, 1.2);
+                }
+                if (insetPoly1 && insetPoly1.length >= 3) {
+                    const a1 = calculatePolygonArea(insetPoly1);
+                    footArea += a1;
+                    totalGfa += a1 * floorsA;
+                }
+                if (insetPoly3 && insetPoly3.length >= 3) {
+                    const a3 = calculatePolygonArea(insetPoly3);
+                    footArea += a3;
+                    totalGfa += a3 * floorsB;
+                }
+            } else {
+                const localPoly1 = clipConvexPolygonVertical(localRing, ob.minX, ob.minX + W * 0.5);
+                let insetPoly1 = null;
+                if (localPoly1 && localPoly1.length >= 3) {
+                    const globalPoly1 = localPoly1.map(pt => ({
+                        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+                        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+                    }));
+                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                }
+                if (insetPoly1 && insetPoly1.length >= 3) {
+                    const a1 = calculatePolygonArea(insetPoly1);
+                    footArea += a1;
+                    totalGfa += a1 * floors;
+                }
+            }
+            footprintArea = footArea;
+            gfa = totalGfa;
         } else { // Tower
             footprintArea = calculatePolygonArea(insetRing);
             gfa = footprintArea * floors;
@@ -2291,6 +3113,22 @@ function updateDashboard(item) {
     if (metUnits) metUnits.textContent = usage === 'Park' ? '0' : dwellingUnits.toLocaleString();
     if (metPopulation) metPopulation.textContent = usage === 'Park' ? '0' : population.toLocaleString();
     if (metDensity) metDensity.textContent = usage === 'Park' ? '0 pp/ha' : `${densityPpHa.toLocaleString()} pp/ha`;
+
+    // ── Sustainability Indicators ──
+    const osr = gfa > 0 ? ((item.area - footprintArea) / gfa) : 0;
+    
+    let carbonFactor = 0;
+    if (usage === 'Residential') carbonFactor = 0.045;
+    else if (usage === 'MixedUse') carbonFactor = 0.055;
+    else if (usage === 'Commercial') carbonFactor = 0.075;
+    else if (usage === 'Civic') carbonFactor = 0.050;
+    const carbon = gfa * carbonFactor;
+
+    const runoff = bcr * 0.90 + (1 - bcr) * 0.15;
+
+    if (metOsr) metOsr.textContent = gfa > 0 ? osr.toFixed(2) : 'N/A';
+    if (metCarbon) metCarbon.textContent = carbon > 0 ? `${Math.round(carbon).toLocaleString()} t CO2e/yr` : '0 t CO2e/yr';
+    if (metRunoff) metRunoff.textContent = runoff.toFixed(2);
 }
 
 // Capture current 3D WebGL viewport canvas as a PNG screenshot download
@@ -2307,6 +3145,202 @@ function captureViewport() {
     } catch (e) {
         console.error(e);
         alert("Failed to capture viewport screenshot.");
+    }
+}
+
+// Export complete planning and sustainability parameters for all parcels as a CSV report
+function exportPlanningReport() {
+    try {
+        if (!parcelFeatures || parcelFeatures.length === 0) {
+            alert("No parcel data available to export.");
+            return;
+        }
+
+        const headers = [
+            "Parcel ID",
+            "Area (sq m)",
+            "Primary Use",
+            "Typology",
+            "Roof Style",
+            "Setback Distance (m)",
+            "Floor Count",
+            "Floor Height (m)",
+            "Max BCR (Allowed)",
+            "Max FAR (Allowed)",
+            "Max Height (Allowed)",
+            "Actual Footprint Area (sq m)",
+            "Actual GFA (sq m)",
+            "Actual Height (m)",
+            "Actual BCR",
+            "Actual FAR",
+            "Compliance Status",
+            "Est. Dwelling Units",
+            "Est. Population",
+            "Pop. Density (pp/ha)",
+            "Open Space Ratio (OSR)",
+            "Est. Carbon Footprint (t CO2e/yr)",
+            "Stormwater Runoff Coefficient"
+        ];
+
+        const rows = [headers.join(",")];
+
+        parcelFeatures.forEach(item => {
+            const setback = item.params.setback;
+            const floors = item.params.floors;
+            const floorHeight = item.params.floorHeight;
+            const height = floors * floorHeight;
+            const typology = item.params.typology;
+            const usage = item.params.usage;
+            
+            // Calculate footprint area and GFA
+            const insetRing = offsetPolygonRing(item.outerRing, setback);
+            let footprintArea = 0;
+            let gfa = 0;
+            
+            if (usage === 'Park') {
+                footprintArea = 0;
+                gfa = 0;
+            } else if (insetRing && insetRing.length >= 3) {
+                if (typology === 'Courtyard') {
+                    const innerSetback = 8;
+                    const innerRing = offsetPolygonRing(insetRing, innerSetback);
+                    const outerArea = calculatePolygonArea(insetRing);
+                    const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
+                    footprintArea = Math.max(0, outerArea - innerArea);
+                    gfa = footprintArea * floors;
+                } else if (typology === 'Slab') {
+                    const slabShape = buildSlabShape(insetRing, 12);
+                    footprintArea = calculateShapeArea(slabShape);
+                    gfa = footprintArea * floors;
+                } else if (typology === 'LShape') {
+                    const lShape = buildLShape(insetRing, 12);
+                    footprintArea = calculateShapeArea(lShape);
+                    gfa = footprintArea * floors;
+                } else if (typology === 'UShape') {
+                    const uShape = buildUShape(insetRing, 12);
+                    footprintArea = calculateShapeArea(uShape);
+                    gfa = footprintArea * floors;
+                } else if (typology === 'PodiumTower') {
+                    const podiumArea = calculatePolygonArea(insetRing);
+                    const towerRing = offsetPolygonRing(insetRing, 3.5) || insetRing;
+                    const towerArea = calculatePolygonArea(towerRing);
+                    const podiumH = Math.min(height, 2 * floorHeight);
+                    const towerH = Math.max(0, height - podiumH);
+                    const podiumFloors = Math.round(podiumH / floorHeight);
+                    const towerFloors = Math.round(towerH / floorHeight);
+                    footprintArea = podiumArea;
+                    gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
+                } else if (typology === 'SteppedTower') {
+                    const stepInterval = item.params.stepbackInterval || 4;
+                    const stepDepth = item.params.stepbackDepth || 1.5;
+                    let remainingFloors = floors;
+                    let segmentIndex = 0;
+                    footprintArea = calculatePolygonArea(insetRing);
+                    gfa = 0;
+                    while (remainingFloors > 0) {
+                        const currentSetback = setback + segmentIndex * stepDepth;
+                        const segmentRing = offsetPolygonRing(item.outerRing, currentSetback);
+                        if (!segmentRing || segmentRing.length < 3) break;
+                        const segFloors = Math.min(stepInterval, remainingFloors);
+                        const segArea = calculatePolygonArea(segmentRing);
+                        gfa += segArea * segFloors;
+                        remainingFloors -= segFloors;
+                        segmentIndex++;
+                    }
+                } else { // Tower
+                    footprintArea = calculatePolygonArea(insetRing);
+                    gfa = footprintArea * floors;
+                }
+            }
+
+            const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
+            const far = item.area > 0 ? (gfa / item.area) : 0;
+
+            const heightViolation = usage !== 'Park' && height > item.params.maxHeight;
+            const bcrViolation = bcr > item.params.maxBcr;
+            const farViolation = far > item.params.maxFar;
+            const violated = heightViolation || bcrViolation || farViolation || (usage !== 'Park' && footprintArea === 0);
+            const status = violated ? "VIOLATION" : "COMPLIANT";
+
+            // Dwelling units and population
+            let dwellingUnits = 0;
+            let population = 0;
+            const AVG_UNIT_SIZE = 100;
+            const AVG_PERSONS = 2.8;
+
+            if (usage === 'Residential') {
+                dwellingUnits = Math.floor(gfa / AVG_UNIT_SIZE);
+                population = Math.round(dwellingUnits * AVG_PERSONS);
+            } else if (usage === 'MixedUse') {
+                const residentialGfa = Math.max(0, gfa - footprintArea);
+                dwellingUnits = Math.floor(residentialGfa / AVG_UNIT_SIZE);
+                population = Math.round(dwellingUnits * AVG_PERSONS);
+            } else if (usage === 'Commercial' || usage === 'Civic') {
+                dwellingUnits = 0;
+                population = Math.round(gfa / 15);
+            }
+            const densityPpHa = item.area > 0 ? Math.round(population / (item.area / 10000)) : 0;
+
+            // Sustainability
+            const osr = gfa > 0 ? ((item.area - footprintArea) / gfa) : 0;
+            let carbonFactor = 0;
+            if (usage === 'Residential') carbonFactor = 0.045;
+            else if (usage === 'MixedUse') carbonFactor = 0.055;
+            else if (usage === 'Commercial') carbonFactor = 0.075;
+            else if (usage === 'Civic') carbonFactor = 0.050;
+            const carbon = gfa * carbonFactor;
+            const runoff = bcr * 0.90 + (1 - bcr) * 0.15;
+
+            const row = [
+                item.fid !== undefined ? item.fid : "",
+                item.area.toFixed(1),
+                usage,
+                typology,
+                item.params.roofStyle || "Flat",
+                setback.toFixed(1),
+                floors,
+                floorHeight.toFixed(1),
+                item.params.maxBcr.toFixed(2),
+                item.params.maxFar.toFixed(2),
+                item.params.maxHeight.toFixed(1),
+                footprintArea.toFixed(1),
+                gfa.toFixed(1),
+                (usage === 'Park' ? 0 : height).toFixed(1),
+                bcr.toFixed(3),
+                far.toFixed(3),
+                status,
+                dwellingUnits,
+                population,
+                densityPpHa,
+                gfa > 0 ? osr.toFixed(3) : "N/A",
+                carbon.toFixed(1),
+                runoff.toFixed(3)
+            ];
+
+            const csvRow = row.map(val => {
+                const s = String(val);
+                if (s.includes(",") || s.includes("\"") || s.includes("\n")) {
+                    return `"${s.replace(/"/g, '""')}"`;
+                }
+                return s;
+            }).join(",");
+
+            rows.push(csvRow);
+        });
+
+        const csvContent = "\ufeff" + rows.join("\n"); // Add BOM for Excel compatibility
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", "planx_urban_planning_report.csv");
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    } catch (e) {
+        console.error(e);
+        alert("Failed to export planning report CSV.");
     }
 }
 
@@ -2374,6 +3408,23 @@ async function syncToQGIS() {
                 const towerFloors = Math.round(towerH / item.params.floorHeight);
                 footprintArea = podiumArea;
                 gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
+            } else if (item.params.typology === 'SteppedTower') {
+                const stepInterval = item.params.stepbackInterval || 4;
+                const stepDepth = item.params.stepbackDepth || 1.5;
+                let remainingFloors = item.params.floors;
+                let segmentIndex = 0;
+                footprintArea = calculatePolygonArea(insetRing);
+                gfa = 0;
+                while (remainingFloors > 0) {
+                    const currentSetback = setback + segmentIndex * stepDepth;
+                    const segmentRing = offsetPolygonRing(item.outerRing, currentSetback);
+                    if (!segmentRing || segmentRing.length < 3) break;
+                    const segFloors = Math.min(stepInterval, remainingFloors);
+                    const segArea = calculatePolygonArea(segmentRing);
+                    gfa += segArea * segFloors;
+                    remainingFloors -= segFloors;
+                    segmentIndex++;
+                }
             } else { // Tower
                 footprintArea = calculatePolygonArea(insetRing);
                 gfa = footprintArea * item.params.floors;
@@ -2397,6 +3448,8 @@ async function syncToQGIS() {
             max_far: item.params.maxFar,
             max_height: item.params.maxHeight,
             roof_style: item.params.roofStyle || 'Flat',
+            stepback_i: item.params.stepbackInterval || 4,
+            stepback_d: item.params.stepbackDepth || 1.5,
             coordinates: geoCoords
         };
     });
@@ -2684,6 +3737,8 @@ function applyToAllParcels() {
         item.params.typology = templateParams.typology;
         item.params.usage = templateParams.usage;
         item.params.roofStyle = templateParams.roofStyle;
+        item.params.stepbackInterval = templateParams.stepbackInterval;
+        item.params.stepbackDepth = templateParams.stepbackDepth;
         item.params.maxBcr = templateParams.maxBcr;
         item.params.maxFar = templateParams.maxFar;
         item.params.maxHeight = templateParams.maxHeight;
@@ -2897,7 +3952,67 @@ function onPointerMove(event) {
 
     raycaster.setFromCamera(mouse, camera);
 
-    // 1. If actively dragging the height handle
+    // Render temporary measurement line in Measurement Mode
+    if (isMeasurementMode) {
+        document.body.style.cursor = 'crosshair';
+        
+        if (measurementPoints.length === 1 && tempMeasureLine) {
+            const allIntersects = raycaster.intersectObjects(scene.children, true);
+            const filtered = allIntersects.filter(hit => {
+                return hit.object.type === 'Mesh' && 
+                       !hit.object.userData?.isHeightHandle && 
+                       !hit.object.userData?.isSetbackHandle && 
+                       !hit.object.userData?.isMeasurementElement;
+            });
+
+            if (filtered.length > 0) {
+                const hitPoint = filtered[0].point;
+                const start = measurementPoints[0];
+                
+                const positions = new Float32Array([
+                    start.x, start.y, start.z,
+                    hitPoint.x, hitPoint.y, hitPoint.z
+                ]);
+                tempMeasureLine.geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+                tempMeasureLine.geometry.attributes.position.needsUpdate = true;
+                tempMeasureLine.geometry.computeBoundingSphere();
+                tempMeasureLine.geometry.computeBoundingBox();
+                tempMeasureLine.visible = true;
+                
+                // Show dynamic temporary label
+                if (tempMeasureLabel) {
+                    tempMeasureLabel.style.display = 'block';
+                }
+            }
+        }
+        return;
+    }
+
+    // 1. If actively dragging the setback handle
+    if (isDraggingSetback && selectedParcel && setbackHandleMesh) {
+        const intersectPoint = new THREE.Vector3();
+        raycaster.ray.intersectPlane(dragIntersectionPlane, intersectPoint);
+        
+        const pt = { x: intersectPoint.x, y: -intersectPoint.z };
+        const newSetback = getDistanceToPolygon(pt, selectedParcel.outerRing);
+        const clampedSetback = Math.max(0, Math.min(15, Math.round(newSetback * 2) / 2)); // step = 0.5
+        
+        if (clampedSetback !== selectedParcel.params.setback) {
+            selectedParcel.params.setback = clampedSetback;
+            inSetback.value = clampedSetback;
+            lblSetback.textContent = clampedSetback.toFixed(1);
+            selectedParcel.modified = true;
+            
+            rebuildParcel3D(selectedParcel);
+            updateDashboard(selectedParcel);
+            updateHeightHandle();
+            updateSetbackHandle();
+        }
+        document.body.style.cursor = 'ew-resize';
+        return;
+    }
+
+    // 2. If actively dragging the height handle
     if (isDraggingHeight && selectedParcel && heightHandleMesh) {
         const intersectPoint = new THREE.Vector3();
         raycaster.ray.intersectPlane(dragIntersectionPlane, intersectPoint);
@@ -2921,7 +4036,20 @@ function onPointerMove(event) {
         return;
     }
 
-    // 2. If hovering over the height handle
+    // 3. If hovering over the setback handle
+    if (setbackHandleMesh) {
+        const handleIntersects = raycaster.intersectObject(setbackHandleMesh, true);
+        if (handleIntersects.length > 0) {
+            document.body.style.cursor = 'ew-resize';
+            if (hoveredParcel && hoveredParcel !== selectedParcel) {
+                setBuildingHoverHighlight(hoveredParcel.buildingMesh, false);
+                hoveredParcel = null;
+            }
+            return;
+        }
+    }
+
+    // 4. If hovering over the height handle
     if (heightHandleMesh) {
         const handleIntersects = raycaster.intersectObject(heightHandleMesh, true);
         if (handleIntersects.length > 0) {
@@ -3098,7 +4226,7 @@ function removeHeightHandle() {
     }
 }
 
-// Pointer down event handler to detect starting of height dragging
+// Pointer down event handler to detect starting of height or setback dragging
 function onPointerDown(event) {
     if (event.target.closest('#control-dock') || event.target.closest('.hud-bar') || event.target.closest('.loading-screen')) return;
 
@@ -3106,6 +4234,18 @@ function onPointerDown(event) {
     mouse.y = -(event.clientY / window.innerHeight) * 2 + 1;
 
     raycaster.setFromCamera(mouse, camera);
+
+    if (setbackHandleMesh) {
+        const handleIntersects = raycaster.intersectObject(setbackHandleMesh, true);
+        if (handleIntersects.length > 0) {
+            isDraggingSetback = true;
+            controls.enabled = false; // Disable camera rotation
+            
+            // drag plane is the horizontal ground plane at y = 0.1
+            dragIntersectionPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.1);
+            return;
+        }
+    }
 
     if (heightHandleMesh) {
         const handleIntersects = raycaster.intersectObject(heightHandleMesh, true);
@@ -3130,10 +4270,915 @@ function onPointerDown(event) {
     }
 }
 
-// Pointer up event handler to release height dragging
+// Pointer up event handler to release dragging
 function onPointerUp(event) {
     if (isDraggingHeight) {
         isDraggingHeight = false;
         controls.enabled = true; // Re-enable camera rotation
     }
+    if (isDraggingSetback) {
+        isDraggingSetback = false;
+        controls.enabled = true; // Re-enable camera rotation
+    }
 }
+
+// Spawn 3D horizontal dragging handle for setback adjustments
+function spawnSetbackHandle(mx, my) {
+    removeSetbackHandle();
+
+    const handleGroup = new THREE.Group();
+
+    // Torus ring flat on ground
+    const torusGeom = new THREE.TorusGeometry(1.2, 0.22, 8, 24);
+    torusGeom.rotateX(Math.PI / 2);
+    const mat = new THREE.MeshStandardMaterial({
+        color: 0x14b8a6,
+        emissive: 0x14b8a6,
+        emissiveIntensity: 0.6,
+        roughness: 0.2,
+        metalness: 0.8
+    });
+    const torus = new THREE.Mesh(torusGeom, mat);
+    torus.castShadow = true;
+    handleGroup.add(torus);
+
+    // Cylinder pin
+    const pinGeom = new THREE.CylinderGeometry(0.08, 0.08, 0.8, 8);
+    const pin = new THREE.Mesh(pinGeom, mat);
+    pin.position.y = 0.4;
+    pin.castShadow = true;
+    handleGroup.add(pin);
+
+    // Sphere cap
+    const capGeom = new THREE.SphereGeometry(0.22, 8, 8);
+    const cap = new THREE.Mesh(capGeom, mat);
+    cap.position.y = 0.8;
+    cap.castShadow = true;
+    handleGroup.add(cap);
+
+    handleGroup.position.set(mx, 0.1, -my);
+    handleGroup.userData = { isSetbackHandle: true };
+
+    scene.add(handleGroup);
+    setbackHandleMesh = handleGroup;
+}
+
+// Update setback handle position based on updated footprint coordinates
+function updateSetbackHandle() {
+    if (!selectedParcel || !setbackHandleMesh) return;
+
+    const setback = selectedParcel.params.setback;
+    const insetRing = offsetPolygonRing(selectedParcel.outerRing, setback);
+    if (!insetRing || insetRing.length < 2) {
+        removeSetbackHandle();
+        return;
+    }
+
+    // Place handle on first segment midpoint
+    const pt1 = insetRing[0];
+    const pt2 = insetRing[1];
+    const mx = (pt1.x + pt2.x) / 2;
+    const my = (pt1.y + pt2.y) / 2;
+
+    setbackHandleMesh.position.set(mx, 0.1, -my);
+}
+
+// Remove setback handle and clean WebGL resources
+function removeSetbackHandle() {
+    if (setbackHandleMesh) {
+        scene.remove(setbackHandleMesh);
+        setbackHandleMesh.traverse(child => {
+            if (child.isMesh) {
+                child.geometry.dispose();
+                child.material.dispose();
+            }
+        });
+        setbackHandleMesh = null;
+    }
+}
+
+// Helper to get minimum distance from point to polygon boundary
+function getDistanceToPolygon(pt, ring) {
+    let minDist = Infinity;
+    const N = ring.length;
+    for (let i = 0; i < N; i++) {
+        const a = ring[i];
+        const b = ring[(i + 1) % N];
+        const dist = distToSegment(pt, a, b);
+        if (dist < minDist) {
+            minDist = dist;
+        }
+    }
+    return minDist;
+}
+
+// ───────────────────────── 3D Ruler / Measurement Tool ─────────────────────────
+
+// Initialize the temporary measurement line and HTML label marker
+function initTemporaryMeasurementAssets() {
+    if (!tempMeasureLine) {
+        const lineGeom = new THREE.BufferGeometry();
+        const positions = new Float32Array(6); // 2 points * 3 coordinates
+        lineGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+        const lineMat = new THREE.LineDashedMaterial({
+            color: 0x38bdf8, // light blue/sky
+            dashSize: 2,
+            gapSize: 1,
+            depthTest: false,
+            transparent: true,
+            opacity: 0.8
+        });
+        tempMeasureLine = new THREE.Line(lineGeom, lineMat);
+        tempMeasureLine.visible = false;
+        tempMeasureLine.userData = { isMeasurementElement: true };
+        scene.add(tempMeasureLine);
+    }
+
+    if (!tempMeasureLabel) {
+        const container = document.getElementById('measurement-overlay-container');
+        if (container) {
+            tempMeasureLabel = document.createElement('div');
+            tempMeasureLabel.id = 'temp-measure-label';
+            tempMeasureLabel.className = 'measurement-label temp';
+            tempMeasureLabel.style.display = 'none';
+            container.appendChild(tempMeasureLabel);
+        }
+    }
+}
+
+// Handle clicks in 3D scene when measurement tool is active
+function handleMeasurementClick(pt) {
+    initTemporaryMeasurementAssets();
+
+    // Create marker at click position
+    const markerGeom = new THREE.SphereGeometry(0.4, 16, 16);
+    const markerMat = new THREE.MeshBasicMaterial({ color: 0x10b981, depthTest: false });
+    const marker = new THREE.Mesh(markerGeom, markerMat);
+    marker.position.copy(pt);
+    marker.userData = { isMeasurementElement: true };
+    scene.add(marker);
+
+    if (measurementPoints.length === 0) {
+        measurementPoints.push(pt);
+        // Save the start marker
+        savedMeasurements.push({ type: 'marker', mesh: marker });
+    } else {
+        const startPt = measurementPoints[0];
+        const endPt = pt;
+        
+        // Permanent line
+        const borderPoints = [startPt.clone(), endPt.clone()];
+        const lineGeom = new THREE.BufferGeometry().setFromPoints(borderPoints);
+        const lineMat = new THREE.LineBasicMaterial({
+            color: 0x10b981, // neon emerald green
+            linewidth: 2,
+            depthTest: false
+        });
+        const line = new THREE.Line(lineGeom, lineMat);
+        line.userData = { isMeasurementElement: true };
+        scene.add(line);
+
+        // Permanent Label
+        const midpoint = new THREE.Vector3().addVectors(startPt, endPt).multiplyScalar(0.5);
+        const container = document.getElementById('measurement-overlay-container');
+        let labelEl = null;
+        if (container) {
+            labelEl = document.createElement('div');
+            labelEl.className = 'measurement-label';
+            const distance = startPt.distanceTo(endPt);
+            labelEl.textContent = `${distance.toFixed(2)} m`;
+            container.appendChild(labelEl);
+        }
+
+        // Save the permanent measurement assets
+        savedMeasurements.push({
+            type: 'measurement',
+            line: line,
+            markerStart: savedMeasurements.pop().mesh, // start marker mesh
+            markerEnd: marker,
+            labelEl: labelEl,
+            midpoint: midpoint
+        });
+
+        // Show clear button
+        if (btnClearMeasure) {
+            btnClearMeasure.classList.remove('hidden');
+        }
+
+        // Reset for next measurement
+        measurementPoints = [];
+        if (tempMeasureLine) tempMeasureLine.visible = false;
+        if (tempMeasureLabel) tempMeasureLabel.style.display = 'none';
+    }
+}
+
+// Clear all measurements from scene and DOM
+function clearAllMeasurements() {
+    savedMeasurements.forEach(m => {
+        if (m.type === 'marker' && m.mesh) {
+            scene.remove(m.mesh);
+            m.mesh.geometry.dispose();
+            m.mesh.material.dispose();
+        } else if (m.type === 'measurement') {
+            if (m.line) {
+                scene.remove(m.line);
+                m.line.geometry.dispose();
+                m.line.material.dispose();
+            }
+            if (m.markerStart) {
+                scene.remove(m.markerStart);
+                m.markerStart.geometry.dispose();
+                m.markerStart.material.dispose();
+            }
+            if (m.markerEnd) {
+                scene.remove(m.markerEnd);
+                m.markerEnd.geometry.dispose();
+                m.markerEnd.material.dispose();
+            }
+            if (m.labelEl) {
+                m.labelEl.remove();
+            }
+        }
+    });
+
+    savedMeasurements = [];
+    measurementPoints = [];
+    if (tempMeasureLine) tempMeasureLine.visible = false;
+    if (tempMeasureLabel) tempMeasureLabel.style.display = 'none';
+
+    if (btnClearMeasure) {
+        btnClearMeasure.classList.add('hidden');
+    }
+}
+
+// Recalculate label coordinates on screen space
+function updateMeasurementLabels() {
+    const container = document.getElementById('measurement-overlay-container');
+    if (!container) return;
+
+    // 1. Update active temporary label
+    if (tempMeasureLabel && tempMeasureLine && measurementPoints.length === 1) {
+        // Find current intersection point under cursor
+        const intersects = raycaster.intersectObjects(scene.children, true);
+        const filtered = intersects.filter(hit => {
+            return hit.object.type === 'Mesh' && 
+                   !hit.object.userData?.isHeightHandle && 
+                   !hit.object.userData?.isSetbackHandle && 
+                   !hit.object.userData?.isMeasurementElement;
+        });
+
+        if (filtered.length > 0) {
+            const hitPoint = filtered[0].point;
+            const start = measurementPoints[0];
+            const midpoint = new THREE.Vector3().addVectors(start, hitPoint).multiplyScalar(0.5);
+            const screenPos = project3DToScreen(midpoint);
+            tempMeasureLabel.style.left = `${screenPos.x}px`;
+            tempMeasureLabel.style.top = `${screenPos.y}px`;
+            
+            const distance = start.distanceTo(hitPoint);
+            tempMeasureLabel.textContent = `${distance.toFixed(2)} m`;
+        }
+    }
+
+    // 2. Update all saved permanent labels
+    savedMeasurements.forEach(m => {
+        if (m.type === 'measurement' && m.labelEl) {
+            const screenPos = project3DToScreen(m.midpoint);
+            m.labelEl.style.left = `${screenPos.x}px`;
+            m.labelEl.style.top = `${screenPos.y}px`;
+        }
+    });
+}
+
+// Project 3D vector coordinates to screen pixel positions
+function project3DToScreen(vec3) {
+    const tempV = vec3.clone();
+    tempV.project(camera);
+
+    const x = (tempV.x * 0.5 + 0.5) * window.innerWidth;
+    const y = (tempV.y * -0.5 + 0.5) * window.innerHeight;
+
+    return { x, y };
+}
+
+// ───────────────────────── Procedural City Solver & Optimization ─────────────────────────
+
+// Auto-solve zoning constraints (TAKS/KAKS) for a specific parcel feature
+function optimizeParcelZoning(item) {
+    if (item.params.usage === 'Park') {
+        item.params.floors = 0;
+        item.params.setback = 3.0;
+        item.params.typology = 'Tower';
+        item.modified = true;
+        return;
+    }
+
+    const maxBcr = item.params.maxBcr;
+    const maxFar = item.params.maxFar;
+    const maxHeight = item.params.maxHeight;
+    const floorHeight = item.params.floorHeight || 3.0;
+
+    // 1. Choose suitable building typology based on parcel area and aspect ratio
+    const ob = getOrientedBounds(item.outerRing);
+    const aspect = ob.W > 0 ? (ob.H / ob.W) : 1;
+    let selectedTypology = 'Tower';
+
+    if (item.area > 1500) {
+        // Large parcels: MultiBuildingBlock, Courtyard, PodiumTower, or SteppedTower
+        const r = Math.random();
+        if (r < 0.40) selectedTypology = 'MultiBuildingBlock';
+        else if (r < 0.60) selectedTypology = 'Courtyard';
+        else if (r < 0.80) selectedTypology = 'PodiumTower';
+        else selectedTypology = 'SteppedTower';
+    } else if (item.area > 800) {
+        // Medium parcels: Slab/Row, L-Shape, or U-Shape
+        if (aspect > 1.7 || aspect < 0.6) {
+            selectedTypology = 'Slab';
+        } else {
+            const r = Math.random();
+            selectedTypology = r < 0.5 ? 'LShape' : 'UShape';
+        }
+    } else {
+        // Small parcels: Tower
+        selectedTypology = 'Tower';
+    }
+
+    item.params.typology = selectedTypology;
+
+    // 2. Search for the optimal setback distance that satisfies the Max BCR limit (TAKS)
+    let bestSetback = 3.0;
+    let bestFootprint = 0;
+    let bcrCompliantFound = false;
+
+    // Search from 8.0m down to 2.0m (we want the smallest setback that doesn't violate TAKS)
+    for (let sb = 8.0; sb >= 2.0; sb -= 0.5) {
+        const insetRing = offsetPolygonRing(item.outerRing, sb);
+        if (!insetRing || insetRing.length < 3) continue;
+
+        let footprintArea = 0;
+        if (selectedTypology === 'Courtyard') {
+            const innerSetback = 8;
+            const innerRing = offsetPolygonRing(insetRing, innerSetback);
+            const outerArea = calculatePolygonArea(insetRing);
+            const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
+            footprintArea = Math.max(0, outerArea - innerArea);
+        } else if (selectedTypology === 'Slab') {
+            footprintArea = calculateShapeArea(buildSlabShape(insetRing, 12));
+        } else if (selectedTypology === 'LShape') {
+            footprintArea = calculateShapeArea(buildLShape(insetRing, 12));
+        } else if (selectedTypology === 'UShape') {
+            footprintArea = calculateShapeArea(buildUShape(insetRing, 12));
+        } else if (selectedTypology === 'PodiumTower') {
+            footprintArea = calculatePolygonArea(insetRing);
+        } else if (selectedTypology === 'SteppedTower') {
+            footprintArea = calculatePolygonArea(insetRing);
+        } else if (selectedTypology === 'MultiBuildingBlock') {
+            const obInset = getOrientedBounds(insetRing);
+            const W = obInset.W;
+            const localRing = insetRing.map(pt => {
+                const rx = pt.x - obInset.cx;
+                const ry = pt.y - obInset.cy;
+                return {
+                    x: rx * obInset.ux + ry * obInset.uy,
+                    y: rx * obInset.nx + ry * obInset.ny
+                };
+            });
+            let footArea = 0;
+            if (W >= 40) {
+                const localPoly1 = clipConvexPolygonVertical(localRing, obInset.minX, obInset.minX + W * 0.38);
+                const localPoly3 = clipConvexPolygonVertical(localRing, obInset.minX + W * 0.62, obInset.maxX);
+                let insetPoly1 = null;
+                let insetPoly3 = null;
+                if (localPoly1 && localPoly1.length >= 3) {
+                    const globalPoly1 = localPoly1.map(pt => ({
+                        x: obInset.cx + pt.x * obInset.ux + pt.y * obInset.nx,
+                        y: obInset.cy + pt.x * obInset.uy + pt.y * obInset.ny
+                    }));
+                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                }
+                if (localPoly3 && localPoly3.length >= 3) {
+                    const globalPoly3 = localPoly3.map(pt => ({
+                        x: obInset.cx + pt.x * obInset.ux + pt.y * obInset.nx,
+                        y: obInset.cy + pt.x * obInset.uy + pt.y * obInset.ny
+                    }));
+                    insetPoly3 = offsetPolygonRing(globalPoly3, 1.2);
+                }
+                if (insetPoly1 && insetPoly1.length >= 3) footArea += calculatePolygonArea(insetPoly1);
+                if (insetPoly3 && insetPoly3.length >= 3) footArea += calculatePolygonArea(insetPoly3);
+            } else {
+                const localPoly1 = clipConvexPolygonVertical(localRing, obInset.minX, obInset.minX + W * 0.5);
+                let insetPoly1 = null;
+                if (localPoly1 && localPoly1.length >= 3) {
+                    const globalPoly1 = localPoly1.map(pt => ({
+                        x: obInset.cx + pt.x * obInset.ux + pt.y * obInset.nx,
+                        y: obInset.cy + pt.x * obInset.uy + pt.y * obInset.ny
+                    }));
+                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                }
+                if (insetPoly1 && insetPoly1.length >= 3) footArea += calculatePolygonArea(insetPoly1);
+            }
+            footprintArea = footArea;
+        } else { // Tower
+            footprintArea = calculatePolygonArea(insetRing);
+        }
+
+        const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
+        if (bcr <= maxBcr) {
+            bestSetback = sb;
+            bestFootprint = footprintArea;
+            bcrCompliantFound = true;
+            break; // found the optimal setback maximizing footprint within constraints
+        }
+    }
+
+    // Fallback if no compliant setback is found
+    if (!bcrCompliantFound) {
+        bestSetback = 4.0;
+        const insetRing = offsetPolygonRing(item.outerRing, bestSetback);
+        if (insetRing && insetRing.length >= 3) {
+            bestFootprint = calculatePolygonArea(insetRing) * 0.5;
+        }
+    }
+
+    item.params.setback = bestSetback;
+
+    // 3. Optimize Floor Count (Maximize GFA up to KAKS and Height limits)
+    let maxFloorsHeight = Math.floor(maxHeight / floorHeight);
+    let maxFloorsFar = bestFootprint > 0 ? Math.floor((maxFar * item.area) / bestFootprint) : 1;
+
+    // Refined solver for stacked typologies
+    if (selectedTypology === 'PodiumTower') {
+        const towerRing = offsetPolygonRing(offsetPolygonRing(item.outerRing, bestSetback), 3.5);
+        const towerArea = towerRing ? calculatePolygonArea(towerRing) : bestFootprint * 0.6;
+        const podiumArea = bestFootprint;
+        const maxGfa = maxFar * item.area;
+        const remainingGfa = maxGfa - podiumArea * 2;
+        if (remainingGfa > 0 && towerArea > 0) {
+            maxFloorsFar = 2 + Math.floor(remainingGfa / towerArea);
+        } else {
+            maxFloorsFar = Math.floor(maxGfa / podiumArea);
+        }
+    } else if (selectedTypology === 'SteppedTower') {
+        const stepInterval = item.params.stepbackInterval || 4;
+        const stepDepth = item.params.stepbackDepth || 1.5;
+        let testFloors = 1;
+        while (testFloors <= 30) {
+            let remainingFloors = testFloors;
+            let segmentIndex = 0;
+            let testGfa = 0;
+            while (remainingFloors > 0) {
+                const currentSetback = bestSetback + segmentIndex * stepDepth;
+                const segmentRing = offsetPolygonRing(item.outerRing, currentSetback);
+                if (!segmentRing || segmentRing.length < 3) break;
+                const segFloors = Math.min(stepInterval, remainingFloors);
+                const segArea = calculatePolygonArea(segmentRing);
+                testGfa += segArea * segFloors;
+                remainingFloors -= segFloors;
+                segmentIndex++;
+            }
+            if (testGfa / item.area > maxFar || testFloors * floorHeight > maxHeight) {
+                testFloors--;
+                break;
+            }
+            testFloors++;
+        }
+        maxFloorsFar = Math.max(1, testFloors);
+    } else if (selectedTypology === 'MultiBuildingBlock') {
+        const insetRing = offsetPolygonRing(item.outerRing, bestSetback);
+        if (insetRing && insetRing.length >= 3) {
+            const obInset = getOrientedBounds(insetRing);
+            const W = obInset.W;
+            const localRing = insetRing.map(pt => {
+                const rx = pt.x - obInset.cx;
+                const ry = pt.y - obInset.cy;
+                return {
+                    x: rx * obInset.ux + ry * obInset.uy,
+                    y: rx * obInset.nx + ry * obInset.ny
+                };
+            });
+            let footArea1 = 0;
+            let footArea3 = 0;
+            if (W >= 40) {
+                const localPoly1 = clipConvexPolygonVertical(localRing, obInset.minX, obInset.minX + W * 0.38);
+                const localPoly3 = clipConvexPolygonVertical(localRing, obInset.minX + W * 0.62, obInset.maxX);
+                let insetPoly1 = null;
+                let insetPoly3 = null;
+                if (localPoly1 && localPoly1.length >= 3) {
+                    const globalPoly1 = localPoly1.map(pt => ({
+                        x: obInset.cx + pt.x * obInset.ux + pt.y * obInset.nx,
+                        y: obInset.cy + pt.x * obInset.uy + pt.y * obInset.ny
+                    }));
+                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                }
+                if (localPoly3 && localPoly3.length >= 3) {
+                    const globalPoly3 = localPoly3.map(pt => ({
+                        x: obInset.cx + pt.x * obInset.ux + pt.y * obInset.nx,
+                        y: obInset.cy + pt.x * obInset.uy + pt.y * obInset.ny
+                    }));
+                    insetPoly3 = offsetPolygonRing(globalPoly3, 1.2);
+                }
+                if (insetPoly1 && insetPoly1.length >= 3) footArea1 = calculatePolygonArea(insetPoly1);
+                if (insetPoly3 && insetPoly3.length >= 3) footArea3 = calculatePolygonArea(insetPoly3);
+            } else {
+                const localPoly1 = clipConvexPolygonVertical(localRing, obInset.minX, obInset.minX + W * 0.5);
+                let insetPoly1 = null;
+                if (localPoly1 && localPoly1.length >= 3) {
+                    const globalPoly1 = localPoly1.map(pt => ({
+                        x: obInset.cx + pt.x * obInset.ux + pt.y * obInset.nx,
+                        y: obInset.cy + pt.x * obInset.uy + pt.y * obInset.ny
+                    }));
+                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                }
+                if (insetPoly1 && insetPoly1.length >= 3) footArea1 = calculatePolygonArea(insetPoly1);
+            }
+            let testFloors = 1;
+            while (testFloors <= 30) {
+                const floorsA = Math.round(testFloors * 1.3);
+                const floorsB = Math.round(testFloors * 0.7);
+                const testGfa = footArea1 * floorsA + footArea3 * floorsB;
+                const tallestHeight = Math.max(floorsA, floorsB) * floorHeight;
+                if (testGfa / item.area > maxFar || tallestHeight > maxHeight) {
+                    testFloors--;
+                    break;
+                }
+                testFloors++;
+            }
+            maxFloorsFar = Math.max(1, testFloors);
+        } else {
+            maxFloorsFar = 1;
+        }
+    }
+
+    let optimalFloors = Math.min(maxFloorsHeight, maxFloorsFar);
+    optimalFloors = Math.max(1, Math.min(30, optimalFloors));
+
+    item.params.floors = optimalFloors;
+    item.modified = true;
+}
+
+// Automatically solve and optimize zoning constraints for all parcels in the city
+function solveCityLayout() {
+    if (!parcelFeatures || parcelFeatures.length === 0) {
+        alert("No parcels loaded to solve.");
+        return;
+    }
+
+    parcelFeatures.forEach(item => {
+        optimizeParcelZoning(item);
+        rebuildParcel3D(item);
+    });
+
+    if (selectedParcel) {
+        selectParcel(selectedParcel);
+        updateDashboard(selectedParcel);
+    }
+
+    alert(`Procedural solver successfully optimized layout constraints for all ${parcelFeatures.length} parcels in the city!`);
+}
+
+// ───────────────────────── Procedural Landscaping & Facade Assets ─────────────────────────
+
+// Generate a grass garden lawn in the setback zone
+function buildSetbackLawn(item, insetRing) {
+    if (item.params.usage === 'Park') return null;
+
+    const lawnShape = new THREE.Shape();
+    item.outerRing.forEach((pt, i) => {
+        if (i === 0) lawnShape.moveTo(pt.x, pt.y);
+        else lawnShape.lineTo(pt.x, pt.y);
+    });
+
+    if (insetRing && insetRing.length >= 3) {
+        const hole = new THREE.Path();
+        insetRing.forEach((pt, i) => {
+            if (i === 0) hole.moveTo(pt.x, pt.y);
+            else hole.lineTo(pt.x, pt.y);
+        });
+        lawnShape.holes.push(hole);
+    }
+
+    const lawnGeom = new THREE.ExtrudeGeometry(lawnShape, { depth: 0.08, bevelEnabled: false });
+    lawnGeom.rotateX(-Math.PI / 2);
+    lawnGeom.translate(0, 0.04, 0); // slightly elevated above street level
+
+    const lawnMat = new THREE.MeshStandardMaterial({ color: 0x166534, roughness: 0.95 });
+    const lawnMesh = new THREE.Mesh(lawnGeom, lawnMat);
+    lawnMesh.receiveShadow = true;
+    return lawnMesh;
+}
+
+// Construct a streetlight lamppost with a spotlight source
+function buildStreetlight(x, y, z) {
+    const group = new THREE.Group();
+    group.position.set(x, y, z);
+
+    // Pole
+    const poleGeom = new THREE.CylinderGeometry(0.1, 0.15, 5, 8);
+    const poleMat = new THREE.MeshStandardMaterial({ color: 0x475569, metalness: 0.8, roughness: 0.3 });
+    const pole = new THREE.Mesh(poleGeom, poleMat);
+    pole.position.y = 2.5;
+    pole.castShadow = true;
+    group.add(pole);
+
+    // Arm
+    const armGeom = new THREE.BoxGeometry(0.15, 0.15, 1.2);
+    const arm = new THREE.Mesh(armGeom, poleMat);
+    arm.position.set(0, 5.0, 0.5);
+    arm.rotation.x = 0.1;
+    arm.castShadow = true;
+    group.add(arm);
+
+    // Lamp bulb
+    const bulbGeom = new THREE.SphereGeometry(0.2, 8, 8);
+    const tVal = parseFloat(inTime.value);
+    const isNight = tVal < 7.5 || tVal > 19.5;
+    const bulbMat = new THREE.MeshBasicMaterial({ 
+        color: 0xfef08a,
+        transparent: true,
+        opacity: isNight ? 1.0 : 0.2
+    });
+    const bulb = new THREE.Mesh(bulbGeom, bulbMat);
+    bulb.position.set(0, 4.9, 1.1);
+    bulb.userData = { isStreetlightBulb: true };
+    group.add(bulb);
+
+    // Light source pointing downwards
+    const spotlight = new THREE.SpotLight(0xfef08a, isNight ? 3.0 : 0.0, 15, Math.PI / 4, 0.5, 1);
+    spotlight.position.set(0, 4.8, 1.1);
+    spotlight.target.position.set(0, 0, 1.1);
+    group.add(spotlight);
+    group.add(spotlight.target);
+
+    return group;
+}
+
+// Generate street trees and lamp posts along outer parcel boundary segments
+function addSidewalkTreesAndAssets(group, item, insetRing) {
+    if (item.params.usage === 'Park') return;
+
+    // Calculate centroid of parcel to determine inward direction
+    let cx = 0, cy = 0;
+    item.outerRing.forEach(pt => { cx += pt.x; cy += pt.y; });
+    cx /= item.outerRing.length;
+    cy /= item.outerRing.length;
+
+    const ring = item.outerRing;
+    const len = ring.length;
+    for (let i = 0; i < len; i++) {
+        const p1 = ring[i];
+        const p2 = ring[(i + 1) % len];
+
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Place streetlights at corners
+        if (i % 2 === 0) {
+            const streetLamp = buildStreetlight(p1.x, 0.08, -p1.y);
+            group.add(streetLamp);
+        }
+
+        // Place street trees on boundary segments longer than 12m
+        if (dist > 12) {
+            const numTrees = Math.floor(dist / 10);
+            for (let j = 1; j <= numTrees; j++) {
+                const t = j / (numTrees + 1);
+                const bx = p1.x + dx * t;
+                const by = p1.y + dy * t;
+
+                // Inward normal pointing towards parcel center
+                const nx = cx - bx;
+                const ny = cy - by;
+                const nLen = Math.sqrt(nx * nx + ny * ny);
+                if (nLen > 0) {
+                    // Offset inward by 1.8m so it sits inside the setback lawn
+                    const offsetDistance = 1.8;
+                    const tx = bx + (nx / nLen) * offsetDistance;
+                    const ty = by + (ny / nLen) * offsetDistance;
+
+                    const treeHeight = 3.5 + Math.random() * 2.5;
+                    const styles = ['deciduous', 'spherical', 'conifer'];
+                    const style = styles[Math.floor(Math.random() * styles.length)];
+                    const tree = buildLowPolyTree(tx, 0.08, -ty, treeHeight, style);
+                    group.add(tree);
+                }
+            }
+        }
+    }
+}
+
+// Procedurally extrude concrete balconies and railings on building facades
+function addBuildingBalconies(group, insetRing, floors, floorHeight) {
+    if (floors <= 1) return;
+
+    const len = insetRing.length;
+    for (let i = 0; i < len; i++) {
+        // Place balconies on alternate facades for architectural rhythm
+        if (i % 2 !== 0) continue;
+
+        const p1 = insetRing[i];
+        const p2 = insetRing[(i + 1) % len];
+
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+
+        // Build balconies on wide facades
+        if (dist > 12) {
+            const mx = (p1.x + p2.x) / 2;
+            const my = (p1.y + p2.y) / 2;
+
+            // Outward normal vector
+            let nx = dy;
+            let ny = -dx;
+            const nLen = Math.sqrt(nx * nx + ny * ny);
+            if (nLen > 0) {
+                nx /= nLen;
+                ny /= nLen;
+
+                const angle = Math.atan2(dy, dx);
+
+                // Add balconies for each upper floor
+                for (let f = 1; f < floors; f++) {
+                    const bh = f * floorHeight;
+
+                    const balcony = new THREE.Group();
+                    balcony.position.set(mx + nx * 0.5, bh, -(my + ny * 0.5));
+                    balcony.rotation.y = angle;
+
+                    // Slab
+                    const slabWidth = dist * 0.4;
+                    const slabGeom = new THREE.BoxGeometry(slabWidth, 0.12, 1.2);
+                    const slabMat = new THREE.MeshStandardMaterial({ color: 0xe2e8f0, roughness: 0.5 });
+                    const slab = new THREE.Mesh(slabGeom, slabMat);
+                    slab.position.set(0, -0.06, 0.6);
+                    slab.castShadow = true;
+                    slab.receiveShadow = true;
+                    balcony.add(slab);
+
+                    // Glass railing
+                    const railGeom = new THREE.BoxGeometry(slabWidth, 1.0, 0.05);
+                    const railMat = new THREE.MeshStandardMaterial({ 
+                        color: 0x38bdf8, 
+                        transparent: true, 
+                        opacity: 0.4,
+                        roughness: 0.1,
+                        metalness: 0.9
+                    });
+                    const rail = new THREE.Mesh(railGeom, railMat);
+                    rail.position.set(0, 0.5, 1.2);
+                    rail.castShadow = true;
+                    balcony.add(rail);
+
+                    // Glass railing sides
+                    const sideRailGeom = new THREE.BoxGeometry(0.05, 1.0, 1.2);
+                    for (let side = -1; side <= 1; side += 2) {
+                        const sideRail = new THREE.Mesh(sideRailGeom, railMat);
+                        sideRail.position.set(side * (slabWidth / 2), 0.5, 0.6);
+                        sideRail.castShadow = true;
+                        balcony.add(sideRail);
+                    }
+
+                    group.add(balcony);
+                }
+            }
+        }
+    }
+}
+
+// Clip convex polygon with vertical lines in 2D local space
+function clipConvexPolygonVertical(localRing, X_start, X_end) {
+    const N = localRing.length;
+    const allPts = [];
+
+    // 1. Get intersections at X_start
+    const y_start_intersects = [];
+    for (let i = 0; i < N; i++) {
+        const p1 = localRing[i];
+        const p2 = localRing[(i + 1) % N];
+        if ((p1.x <= X_start && X_start <= p2.x) || (p2.x <= X_start && X_start <= p1.x)) {
+            if (Math.abs(p2.x - p1.x) > 0.0001) {
+                const t = (X_start - p1.x) / (p2.x - p1.x);
+                const y = p1.y + t * (p2.y - p1.y);
+                y_start_intersects.push(y);
+            }
+        }
+    }
+    y_start_intersects.sort((a, b) => a - b);
+    if (y_start_intersects.length >= 2) {
+        allPts.push({ x: X_start, y: y_start_intersects[0] });
+        allPts.push({ x: X_start, y: y_start_intersects[y_start_intersects.length - 1] });
+    }
+
+    // 2. Get original vertices that lie between X_start and X_end
+    for (let i = 0; i < N; i++) {
+        const p = localRing[i];
+        if (p.x > X_start && p.x < X_end) {
+            allPts.push(p);
+        }
+    }
+
+    // 3. Get intersections at X_end
+    const y_end_intersects = [];
+    for (let i = 0; i < N; i++) {
+        const p1 = localRing[i];
+        const p2 = localRing[(i + 1) % N];
+        if ((p1.x <= X_end && X_end <= p2.x) || (p2.x <= X_end && X_end <= p1.x)) {
+            if (Math.abs(p2.x - p1.x) > 0.0001) {
+                const t = (X_end - p1.x) / (p2.x - p1.x);
+                const y = p1.y + t * (p2.y - p1.y);
+                y_end_intersects.push(y);
+            }
+        }
+    }
+    y_end_intersects.sort((a, b) => a - b);
+    if (y_end_intersects.length >= 2) {
+        allPts.push({ x: X_end, y: y_end_intersects[y_end_intersects.length - 1] });
+        allPts.push({ x: X_end, y: y_end_intersects[0] });
+    }
+
+    // Filter duplicates
+    const uniquePts = [];
+    allPts.forEach(p => {
+        if (!uniquePts.some(u => Math.abs(u.x - p.x) < 0.01 && Math.abs(u.y - p.y) < 0.01)) {
+            uniquePts.push(p);
+        }
+    });
+
+    if (uniquePts.length < 3) return null;
+
+    // Sort counter-clockwise around centroid
+    let cx = 0, cy = 0;
+    uniquePts.forEach(p => { cx += p.x; cy += p.y; });
+    cx /= uniquePts.length;
+    cy /= uniquePts.length;
+
+    uniquePts.sort((a, b) => {
+        return Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx);
+    });
+
+    return uniquePts;
+}
+
+// Generate a detailed low-poly car group (reused for parked cars and traffic)
+function buildDetailedCar(colorHex, scale = 1.0) {
+    const carGroup = new THREE.Group();
+
+    // Body base
+    const bodyGeom = new THREE.BoxGeometry(2.4 * scale, 0.6 * scale, 1.1 * scale);
+    const bodyMat = new THREE.MeshStandardMaterial({ color: colorHex, roughness: 0.5 });
+    const body = new THREE.Mesh(bodyGeom, bodyMat);
+    body.castShadow = true;
+    body.receiveShadow = true;
+    body.position.y = 0.3 * scale;
+    carGroup.add(body);
+
+    // Cabin
+    const cabinGeom = new THREE.BoxGeometry(1.3 * scale, 0.5 * scale, 0.95 * scale);
+    const cabinMat = new THREE.MeshStandardMaterial({ color: 0x111111, roughness: 0.2 });
+    const cabin = new THREE.Mesh(cabinGeom, cabinMat);
+    cabin.castShadow = true;
+    cabin.position.set(-0.15 * scale, 0.8 * scale, 0);
+    carGroup.add(cabin);
+
+    // Wheels (4 cylinders)
+    const wheelGeom = new THREE.CylinderGeometry(0.24 * scale, 0.24 * scale, 0.2 * scale, 8);
+    wheelGeom.rotateX(Math.PI / 2);
+    const wheelMat = new THREE.MeshStandardMaterial({ color: 0x18181b, roughness: 0.9 });
+    
+    const wheelOffsets = [
+        { x: 0.7, z: 0.55 },
+        { x: 0.7, z: -0.55 },
+        { x: -0.7, z: 0.55 },
+        { x: -0.7, z: -0.55 }
+    ];
+    
+    wheelOffsets.forEach(offset => {
+        const wheel = new THREE.Mesh(wheelGeom, wheelMat);
+        wheel.position.set(offset.x * scale, 0.12 * scale, offset.z * scale);
+        wheel.castShadow = true;
+        carGroup.add(wheel);
+    });
+
+    // Lights
+    const headlightGeom = new THREE.SphereGeometry(0.08 * scale, 8, 8);
+    const headlightMat = new THREE.MeshBasicMaterial({ color: 0xfef08a });
+    const taillightMat = new THREE.MeshBasicMaterial({ color: 0xef4444 });
+
+    for (let side = -1; side <= 1; side += 2) {
+        const hl = new THREE.Mesh(headlightGeom, headlightMat);
+        hl.position.set(1.2 * scale, 0.3 * scale, side * 0.45 * scale);
+        hl.userData = { isHeadlight: true };
+        hl.visible = false;
+        carGroup.add(hl);
+
+        const tl = new THREE.Mesh(headlightGeom, taillightMat);
+        tl.position.set(-1.2 * scale, 0.3 * scale, side * 0.45 * scale);
+        tl.userData = { isTaillight: true };
+        tl.visible = false;
+        carGroup.add(tl);
+    }
+
+    return carGroup;
+}
+

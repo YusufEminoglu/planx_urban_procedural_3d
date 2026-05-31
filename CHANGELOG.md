@@ -1,5 +1,17 @@
 # Changelog
 
+## [0.4.0] - 2026-05-31
+
+- Implement interactive 3D horizontal Setback dragging handles in viewport
+- Add Stepped Tower building typology with dynamic floor stepping parameters
+- Add visual Zoning Compliance Heatmap coloring parcel grounds (red for violation, green for compliant)
+- Implement a Cinematic Camera Tour mode orbiting active viewport target automatically
+- Add interactive 3D Ruler / Measurement tool with floating DOM labels
+- Integrate expanded sustainability metrics: Open Space Ratio (OSR), Carbon Footprint, and Stormwater Runoff Estimators
+- Upgrade night mode emission textures with multi-colored window glows (warm gold, cool blue, orange)
+- Implement Planning Report Exporter (CSV) button downloading complete zoning parameters and sustainability metrics for all parcels
+
+
 ## [0.3.1] - 2026-05-31
 
 - Implement interactive 3D height-dragging handles for building models in viewport

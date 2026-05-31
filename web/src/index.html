@@ -48,7 +48,7 @@
             if (loading) loading.style.display = 'none';
         };
     </script>
-    <link rel="stylesheet" href="style.css?v=0.3.1">
+    <link rel="stylesheet" href="style.css?v=0.4.0">
     <script type="importmap">
         {
             "imports": {
@@ -69,7 +69,7 @@
         <div class="spinner"></div>
         <h2>PlanX Urban Procedural 3D</h2>
         <p id="loading-text">Loading layer features from QGIS...</p>
-        <div class="version-badge">v0.3.0 — Procedural Engine</div>
+        <div class="version-badge">v0.4.0 — Procedural Engine</div>
     </div>
 
     <!-- 3D Canvas Viewport -->
@@ -110,8 +110,24 @@
                         <option value="LShape">L-Shape</option>
                         <option value="UShape">U-Shape</option>
                         <option value="PodiumTower">Podium Tower</option>
+                        <option value="SteppedTower">Stepped Tower</option>
+                        <option value="MultiBuildingBlock">Multi-Building Block</option>
                     </select>
                 </label>
+            </div>
+
+            <!-- Stepped Tower Parameters (dynamically shown) -->
+            <div id="stepped-tower-controls" class="hidden" style="margin-top: 10px; border-left: 2px solid var(--accent); padding-left: 10px;">
+                <div class="control-group" style="margin-bottom: 8px;">
+                    <label>Stepback Interval: <span id="val-stepback-interval">4</span> floors
+                        <input type="range" id="input-stepback-interval" min="2" max="10" step="1" value="4">
+                    </label>
+                </div>
+                <div class="control-group">
+                    <label>Stepback Depth: <span id="val-stepback-depth">1.5</span> m
+                        <input type="range" id="input-stepback-depth" min="0.5" max="5.0" step="0.5" value="1.5">
+                    </label>
+                </div>
             </div>
 
             <div class="control-group">
@@ -284,23 +300,47 @@
                 <span id="metric-density" class="stat-val">- pp/ha</span>
             </div>
 
+            <hr class="divider">
+
+            <div class="dock-header"><h4>Sustainability Indicators</h4></div>
+            <div class="stat-row">
+                <span>Open Space Ratio (OSR):</span>
+                <span id="metric-osr" class="stat-val">-</span>
+            </div>
+            <div class="stat-row">
+                <span>Carbon Footprint:</span>
+                <span id="metric-carbon" class="stat-val">- t CO2e/yr</span>
+            </div>
+            <div class="stat-row" title="Estimated surface stormwater runoff coefficient (0.0 to 1.0)">
+                <span>Stormwater Runoff:</span>
+                <span id="metric-runoff" class="stat-val">-</span>
+            </div>
+
             <button id="btn-sync" class="sync-button">Sync Parameters to QGIS</button>
             <button id="btn-apply-all" class="apply-all-button">Apply to All Parcels</button>
             <button id="btn-reload" class="reload-button">Reload Data from QGIS</button>
             <button id="btn-capture" class="capture-button">Download Viewport Capture</button>
+            <button id="btn-export-csv" class="export-csv-button">Export Planning Report (CSV)</button>
+            <button id="btn-solve-selected" class="solve-selected-button">Auto-Solve Selected Parcel</button>
         </div>
     </div>
 
     <!-- HUD Indicators -->
     <div class="hud-bar glass-panel">
-        <div class="hud-chip">PlanX Urban Procedural 3D</div>
+        <div class="hud-chip" style="font-weight: 800; background: linear-gradient(135deg, #10b981, #0ea5e9); -webkit-background-clip: text; -webkit-text-fill-color: transparent;">PlanX Urban 3D</div>
         <div class="hud-chip">Total Parcels: <span id="hud-total-parcels">0</span></div>
-        <div class="hud-chip">CRS Projection: <span id="hud-crs">UTM</span></div>
+        <div id="btn-solve-city" class="hud-chip hud-btn" style="background: rgba(168, 85, 247, 0.15); border-color: rgba(168, 85, 247, 0.4);" title="Optimize and Auto-Solve all parcels according to TAKS/KAKS constraints">🪄 Auto-Solve City</div>
+        <div id="btn-tour" class="hud-chip hud-btn" title="Toggle Cinematic Tour (Orbit Camera)">🎬 Cinematic Tour</div>
+        <div id="btn-measure" class="hud-chip hud-btn" title="Toggle 3D Ruler / Measurement Tool">📏 Measure</div>
+        <div id="hud-btn-clear-measure" class="hud-chip hud-btn hidden" style="color: #ef4444;" title="Clear all 3D measurements">❌ Clear</div>
         <div class="hud-chip hud-shortcuts" title="R: Reset camera | F: Focus selected | N: Toggle night | G: Toggle grid">
             ⌨ Shortcuts
         </div>
     </div>
 
-    <script type="module" src="app.js?v=0.3.1"></script>
+    <!-- Floating 3D Measurement Overlay Container -->
+    <div id="measurement-overlay-container" style="position: absolute; top: 0; left: 0; pointer-events: none; z-index: 15; width: 100%; height: 100%; overflow: hidden;"></div>
+ 
+    <script type="module" src="app.js?v=0.4.0"></script>
 </body>
 </html>
