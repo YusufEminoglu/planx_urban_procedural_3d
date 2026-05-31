@@ -7,10 +7,6 @@
 ## [0.2.9] - 2026-05-31
 
 - Add smooth solar shadow animation with interactive Play/Pause control
-
-## [0.2.9] - 2026-05-31
-
-- Add smooth play/pause solar time shadow animation with interactive button
 - Update time format logic to support fine float step values
 
 ## [0.2.8] - 2026-05-31
