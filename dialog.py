@@ -161,7 +161,11 @@ class PluginDialog(QDialog):
         form.setSpacing(12)
 
         self.input_layer = QgsMapLayerComboBox()
-        self.input_layer.setFilters(QgsMapLayerProxyModel.VectorLayer)
+        try:  # QGIS 4 / Qt6 scoped enum
+            poly_filter = QgsMapLayerProxyModel.Filter.PolygonLayer
+        except AttributeError:  # QGIS 3 flat enum
+            poly_filter = QgsMapLayerProxyModel.PolygonLayer
+        self.input_layer.setFilters(poly_filter)
         form.addRow("Polygon layer:", self.input_layer)
 
         info_lbl = QLabel(

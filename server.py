@@ -81,6 +81,11 @@ class SyncHTTPRequestHandler(BaseHTTPRequestHandler):
             ".css": "text/css; charset=utf-8",
             ".js": "application/javascript; charset=utf-8",
             ".png": "image/png",
+            ".jpg": "image/jpeg",
+            ".jpeg": "image/jpeg",
+            ".webp": "image/webp",
+            ".svg": "image/svg+xml",
+            ".ico": "image/x-icon",
             ".json": "application/json"
         }
         mime = mime_types.get(ext, "application/octet-stream")
@@ -126,8 +131,22 @@ class PlanXProceduralServer:
         self.thread = None
 
     def start(self):
-        # Instantiate ThreadingHTTPServer in the main thread to catch port binding errors immediately
-        self.httpd = ReusableThreadingHTTPServer(('127.0.0.1', self.port), SyncHTTPRequestHandler)
+        # Instantiate ThreadingHTTPServer in the main thread to catch port binding errors immediately.
+        # If the requested port is busy, walk forward up to 20 ports and take the first free one.
+        base_port = self.port
+        last_error = None
+        self.httpd = None
+        for candidate in range(base_port, base_port + 21):
+            try:
+                self.httpd = ReusableThreadingHTTPServer(('127.0.0.1', candidate), SyncHTTPRequestHandler)
+                self.port = candidate
+                break
+            except OSError as exc:
+                last_error = exc
+        if self.httpd is None:
+            raise OSError(
+                f"No free port between {base_port} and {base_port + 20}: {last_error}"
+            )
         self.httpd.web_dir = self.web_dir
         self.httpd.sync_callback = self.sync_callback
         self.httpd.geojson_data = self.geojson_data

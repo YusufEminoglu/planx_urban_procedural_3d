@@ -1,9 +1,9 @@
 [general]
 name=PlanX Urban Procedural 3D
 qgisMinimumVersion=3.28
-qgisMaximumVersion=3.99
+qgisMaximumVersion=4.99
 description=Parametric 3D urban design and procedural planning toolbox with real-time compliance feedback.
-version=0.1.13
+version=0.5.0
 author=Yusuf Eminoglu
 email=yusuf.eminoglu@deu.edu.tr
 
@@ -14,7 +14,7 @@ repository=https://github.com/YusufEminoglu/planx_urban_procedural_3d
 homepage=https://github.com/YusufEminoglu/planx_urban_procedural_3d
 
 category=Vector
-tags=planx,qgis,dialog,planx,urban,procedural,3d,zoning,parametric,modelling
+tags=planx,qgis,urban,procedural,3d,zoning,parametric,modelling,urban planning,massing
 icon=icons/icon.png
 
 experimental=False
@@ -23,6 +23,11 @@ hasProcessingProvider=no
 license=GPL-3.0-or-later
 
 changelog=
+    PlanX Urban Procedural 3D 0.5.0 - QGIS 4 ready: plugin now loads on Qt6 (QAction import fix), declares qgisMaximumVersion 4.99, creates sync fields via QMetaType with QVariant fallback, and uses a scoped-enum-safe polygon-only layer picker. Local server falls forward to the next free port when the chosen one is busy and serves more image types. Package slimmed by 1.1 MB by removing unused bundled viewer libraries.
+    PlanX Urban Procedural 3D 0.1.17 - Removes rooftop blinking warning beacons, corrects traffic car heading alignment to road vectors, and adds dynamic in-scene X/Y/Z mass editing with red/blue footprint scale handles plus scale_x/scale_y sync fields.
+    PlanX Urban Procedural 3D 0.1.16 - Adds visible Z proof in the cockpit with Max Z HUD, selected-parcel Z range, optional 3D height labels above buildings, and improved parcel focus behavior.
+    PlanX Urban Procedural 3D 0.1.15 - Hardens live QGIS layer parsing so null/blank floor, height, setback, zoning, or usage attributes cannot flatten 3D massing; adds adaptive buildable-footprint fallback and syncs height_m, z_base, and z_top fields back to QGIS.
+    PlanX Urban Procedural 3D 0.1.14 - Adds scenario presets, city-wide PlanX scoring, heatmap modes, non-blocking toasts, expanded CSV reporting, and QGIS sync fields for score, constraint load, population, carbon, runoff, and open space.
     PlanX Urban Procedural 3D 0.1.13 - Cleans QGIS Hub quality scan warnings by removing unused imports, whitespace issues, inline comment spacing issues, and hidden placeholder files.
     PlanX Urban Procedural 3D 0.1.12 - Converts the web and QGIS interfaces to global English-only copy, removes localized zoning terminology, and polishes the release cockpit.
     PlanX Urban Procedural 3D 0.1.11 - Brightened the web cockpit, added an embedded quick-start HTML guide, and improved first-view daylight readability.

@@ -1,5 +1,38 @@
 # Changelog
 
+## [0.5.0] - 2026-06-10
+
+- QGIS 4 support: Qt6-safe QAction import, QMetaType-based sync fields with QVariant fallback, scoped-enum-safe polygon-only layer picker, qgisMaximumVersion 4.99; automatic fallback to the next free port when the chosen local port is busy; more image MIME types served; package slimmed by 1.1 MB by removing unused bundled viewer libraries (geotiff, unused three.js addons).
+
+## [0.1.17] - 2026-06-04
+
+- Remove blinking red rooftop warning beacons and their animation pass.
+- Correct traffic car heading alignment so car bodies follow inferred road vectors instead of travelling at a skewed angle.
+- Add dynamic in-scene X/Y/Z mass editing: existing Z height handle plus new red X-scale and blue Y-scale footprint handles.
+- Add Mass X Scale and Mass Y Scale controls, CSV export columns, and QGIS sync fields (`scale_x`, `scale_y`).
+
+## [0.1.16] - 2026-06-04
+
+- Add cockpit-visible Z proof: Max Z HUD chip, selected-parcel Z range, and optional height labels above non-park buildings.
+- Add a Height Labels view toggle so users can inspect vertical massing without cluttering dense review scenes.
+- Improve selected-parcel camera focus and reuse the same behavior for the `F` shortcut.
+- Add debug tracking for maximum building height and fallback footprint count.
+
+## [0.1.15] - 2026-06-04
+
+- Fix live QGIS layers that rendered only parcels/setbacks when blank or null floor, height, setback, zoning, usage, or typology attributes produced flat/invalid 3D massing parameters.
+- Add adaptive buildable-footprint fallback: if the requested setback consumes the parcel, the web viewer now reduces the render footprint instead of leaving the scene flat.
+- Support common height/floor aliases such as `height_m`, `height`, `z_top`, `floors`, `floor_count`, `kat`, `kat_adedi`, and `kat_sayisi`.
+- Sync explicit vertical fields back to QGIS: `height_m`, `z_base`, and `z_top`.
+
+## [0.1.14] - 2026-06-04
+
+- Add scenario presets for Balanced Growth, Transit-Oriented Mix, Affordable Mid-Rise, Low-Carbon Campus, and Public Realm Upgrade.
+- Add city-wide PlanX scorecard, parcel heatmap modes, and a compact heatmap legend for review/demo workflows.
+- Add selected-parcel PlanX Score and Constraint Load metrics backed by the shared metric engine.
+- Expand CSV export and QGIS sync fields with score, constraint load, population estimate, carbon, runoff, and open-space area.
+- Replace several blocking browser alerts with non-blocking toast feedback for a smoother cockpit experience.
+
 ## [0.1.13] - 2026-06-01
 
 - Clean QGIS Hub quality scan warnings for Python style and hidden placeholder files.

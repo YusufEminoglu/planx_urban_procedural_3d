@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+﻿<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -47,7 +47,7 @@
             if (loading) loading.style.display = 'none';
         };
     </script>
-    <link rel="stylesheet" href="style.css?v=0.1.13">
+    <link rel="stylesheet" href="style.css?v=0.5.0">
     <script type="importmap">
         {
             "imports": {
@@ -67,7 +67,7 @@
         <div class="spinner"></div>
         <h2>PlanX Urban Procedural 3D</h2>
         <p id="loading-text">Loading layer features from QGIS...</p>
-        <div class="version-badge">v0.1.13 - Hub Quality Clean</div>
+        <div class="version-badge">v0.5.0 - QGIS 4 Ready</div>
     </div>
 
     <div id="viewport"></div>
@@ -87,7 +87,7 @@
 
         <div class="workflow-strip" aria-label="Workflow overview">
             <span>1 Select parcel</span>
-            <span>2 Tune scenario</span>
+            <span>2 Choose strategy</span>
             <span>3 Sync to QGIS</span>
         </div>
 
@@ -100,6 +100,23 @@
                 <span>Parcel Area:</span>
                 <span id="prop-area" class="stat-val">- sq m</span>
             </div>
+
+            <hr class="divider">
+
+            <div class="dock-header">
+                <h4>Scenario Presets</h4>
+            </div>
+            <div class="scenario-preset-grid">
+                <select id="input-scenario-preset" aria-label="Scenario preset">
+                    <option value="balanced">Balanced Growth</option>
+                    <option value="transit">Transit-Oriented Mix</option>
+                    <option value="affordable">Affordable Mid-Rise</option>
+                    <option value="green">Low-Carbon Campus</option>
+                    <option value="park">Public Realm Upgrade</option>
+                </select>
+                <button id="btn-apply-preset" class="preset-button" type="button">Apply</button>
+            </div>
+            <p id="scenario-note" class="scenario-note">Balanced Growth keeps a compact footprint while using most available FAR.</p>
 
             <hr class="divider">
 
@@ -177,6 +194,18 @@
             </div>
 
             <div class="control-group">
+                <label>Mass X Scale: <span id="val-scale-x">1.00</span>x
+                    <input type="range" id="input-scale-x" min="0.35" max="1.60" step="0.05" value="1.00">
+                </label>
+            </div>
+
+            <div class="control-group">
+                <label>Mass Y Scale: <span id="val-scale-y">1.00</span>x
+                    <input type="range" id="input-scale-y" min="0.35" max="1.60" step="0.05" value="1.00">
+                </label>
+            </div>
+
+            <div class="control-group">
                 <label>Solar Time: <span id="val-time">12:00</span></label>
                 <div class="time-control-row">
                     <input type="range" id="input-time" min="6.0" max="22.0" step="0.1" value="12.0" style="flex: 1; margin: 0;">
@@ -242,6 +271,10 @@
                     <input type="checkbox" id="toggle-grid">
                     Show Ground Grid
                 </label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="toggle-height-labels" checked>
+                    Show Height Labels
+                </label>
             </div>
 
             <hr class="divider">
@@ -261,6 +294,10 @@
             <div class="stat-row">
                 <span>Building Height:</span>
                 <span id="metric-height" class="stat-val">- m</span>
+            </div>
+            <div class="stat-row">
+                <span>Z Range:</span>
+                <span id="metric-z-range" class="stat-val">0.0 - 0.0 m</span>
             </div>
 
             <div class="stat-row-vertical">
@@ -287,6 +324,14 @@
                 <span>Compliance:</span>
                 <span id="metric-status" class="stat-val status-badge compliant">COMPLIANT</span>
             </div>
+            <div class="stat-row">
+                <span>PlanX Score:</span>
+                <span id="metric-plan-score" class="stat-val score-good">-</span>
+            </div>
+            <div class="stat-row">
+                <span>Constraint Load:</span>
+                <span id="metric-constraint-load" class="stat-val">-</span>
+            </div>
 
             <hr class="divider">
 
@@ -312,6 +357,10 @@
                 <span id="metric-osr" class="stat-val">-</span>
             </div>
             <div class="stat-row">
+                <span>Open Space Area:</span>
+                <span id="metric-open-space" class="stat-val">- sq m</span>
+            </div>
+            <div class="stat-row">
                 <span>Carbon Footprint:</span>
                 <span id="metric-carbon" class="stat-val">- t CO2e/yr</span>
             </div>
@@ -332,6 +381,15 @@
     <div class="hud-bar glass-panel">
         <div class="hud-chip brand-chip">PlanX Urban 3D</div>
         <div class="hud-chip">Total Parcels: <span id="hud-total-parcels">0</span></div>
+        <div class="hud-chip">Max Z: <span id="hud-max-z">0 m</span></div>
+        <label class="hud-chip heatmap-chip">Heatmap
+            <select id="input-heatmap-mode" aria-label="Heatmap mode">
+                <option value="score">Score</option>
+                <option value="compliance">Compliance</option>
+                <option value="density">Density</option>
+                <option value="carbon">Carbon</option>
+            </select>
+        </label>
         <div id="btn-solve-city" class="hud-chip hud-btn solve-city-chip" title="Optimize all parcels against BCR/FAR constraints">Auto-Solve City</div>
         <div id="btn-tour" class="hud-chip hud-btn" title="Toggle cinematic orbit camera">Cinematic Tour</div>
         <div id="btn-measure" class="hud-chip hud-btn" title="Toggle 3D ruler and measurement tool">Measure</div>
@@ -341,6 +399,37 @@
             Shortcuts
         </div>
     </div>
+
+    <section id="city-scorecard" class="city-scorecard glass-panel" aria-label="City-wide performance summary">
+        <div class="scorecell scorecell-primary">
+            <span class="score-label">PlanX Score</span>
+            <strong id="city-score">-</strong>
+        </div>
+        <div class="scorecell">
+            <span class="score-label">Compliant</span>
+            <strong id="city-compliance-rate">-</strong>
+        </div>
+        <div class="scorecell">
+            <span class="score-label">Total GFA</span>
+            <strong id="city-gfa">-</strong>
+        </div>
+        <div class="scorecell">
+            <span class="score-label">Population</span>
+            <strong id="city-population">-</strong>
+        </div>
+        <div class="scorecell">
+            <span class="score-label">Carbon</span>
+            <strong id="city-carbon">-</strong>
+        </div>
+    </section>
+
+    <div id="heatmap-legend" class="heatmap-legend glass-panel">
+        <span id="legend-title">Score heatmap</span>
+        <div class="legend-ramp"></div>
+        <small id="legend-note">Red underperforms, amber is watchlist, green is strong.</small>
+    </div>
+
+    <div id="toast-container" class="toast-container" aria-live="polite" aria-atomic="true"></div>
 
     <div id="guide-scrim" class="guide-scrim hidden"></div>
     <section id="guide-panel" class="guide-panel glass-panel hidden" role="dialog" aria-labelledby="guide-title" aria-modal="false">
@@ -392,6 +481,6 @@
 
     <div id="measurement-overlay-container" style="position: absolute; top: 0; left: 0; pointer-events: none; z-index: 15; width: 100%; height: 100%; overflow: hidden;"></div>
 
-    <script type="module" src="app.js?v=0.1.13"></script>
+    <script type="module" src="app.js?v=0.5.0"></script>
 </body>
 </html>

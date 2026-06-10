@@ -36,7 +36,7 @@ Testing a zoning scenario usually means modelling in one tool, checking complian
 
 **From a release zip:** download the latest zip from [Releases](https://github.com/YusufEminoglu/planx_urban_procedural_3d/releases) → `Plugins → Install from ZIP`.
 
-Requires QGIS 3.28 or newer and a modern browser. No external Python dependencies.
+Requires QGIS 3.28 or newer — **QGIS 4 fully supported** — and a modern browser. No external Python dependencies. If the chosen local port is busy, the plugin automatically falls forward to the next free one.
 
 ## 📖 Quick start
 

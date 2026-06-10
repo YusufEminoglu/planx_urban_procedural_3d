@@ -11,6 +11,8 @@
     --accent-glow: rgba(13, 148, 136, 0.22);
     --danger: #ef4444;
     --success: #10b981;
+    --warning: #f59e0b;
+    --info: #0ea5e9;
     --shadow-soft: 0 18px 42px rgba(15, 23, 42, 0.18);
     --font-family: 'Inter', system-ui, -apple-system, sans-serif;
     --radius: 8px;
@@ -210,9 +212,8 @@ body, html {
     font-size: 0.8rem;
     font-weight: 550;
     color: var(--text-secondary);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
+    display: block;
+    line-height: 1.45;
 }
 
 .control-group label span {
@@ -243,6 +244,40 @@ select:hover {
 select:focus {
     border-color: var(--accent);
     box-shadow: 0 0 0 3px var(--accent-glow);
+}
+
+.scenario-preset-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 76px;
+    gap: 8px;
+}
+
+.preset-button {
+    border: 1px solid rgba(15, 118, 110, 0.3);
+    background: var(--accent);
+    color: #ffffff;
+    border-radius: 8px;
+    font-family: var(--font-family);
+    font-size: 0.78rem;
+    font-weight: 800;
+    cursor: pointer;
+    transition: background 0.16s, transform 0.12s, box-shadow 0.16s;
+}
+
+.preset-button:hover {
+    background: var(--accent-hover);
+    box-shadow: 0 8px 18px rgba(15, 118, 110, 0.18);
+    transform: translateY(-1px);
+}
+
+.scenario-note {
+    color: var(--text-secondary);
+    font-size: 0.76rem;
+    line-height: 1.45;
+    padding: 9px 10px;
+    background: rgba(15, 118, 110, 0.06);
+    border-left: 3px solid rgba(15, 118, 110, 0.45);
+    border-radius: 8px;
 }
 
 input[type="range"] {
@@ -311,6 +346,18 @@ input[type="range"]::-webkit-slider-thumb:hover {
     border: 1px solid rgba(239, 68, 68, 0.35);
 }
 
+.score-good {
+    color: var(--success);
+}
+
+.score-watch {
+    color: var(--warning);
+}
+
+.score-poor {
+    color: var(--danger);
+}
+
 /* Sync Button */
 .sync-button {
     width: 100%;
@@ -357,6 +404,22 @@ input[type="range"]::-webkit-slider-thumb:hover {
     letter-spacing: 0.02em;
 }
 
+.heatmap-chip {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    padding-right: 6px;
+}
+
+.heatmap-chip select {
+    min-width: 92px;
+    padding: 3px 20px 3px 7px;
+    border-radius: 5px;
+    font-size: 0.7rem;
+    font-weight: 800;
+    background: rgba(255, 255, 255, 0.9);
+}
+
 .brand-chip {
     background: rgba(15, 118, 110, 0.92);
     color: #ffffff;
@@ -398,6 +461,132 @@ input[type="range"]::-webkit-slider-thumb:hover {
 #hud-total-parcels, #hud-crs {
     color: var(--accent-hover);
     font-weight: bold;
+}
+
+.city-scorecard {
+    position: absolute;
+    left: 20px;
+    bottom: 20px;
+    z-index: 9;
+    display: grid;
+    grid-template-columns: 118px repeat(4, 96px);
+    gap: 1px;
+    overflow: hidden;
+    padding: 0;
+    background: rgba(255, 255, 255, 0.88);
+}
+
+.scorecell {
+    min-height: 64px;
+    padding: 11px 12px;
+    background: rgba(248, 250, 252, 0.86);
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 4px;
+}
+
+.scorecell-primary {
+    background: rgba(15, 118, 110, 0.94);
+    color: #ffffff;
+}
+
+.score-label {
+    color: inherit;
+    opacity: 0.72;
+    font-size: 0.64rem;
+    font-weight: 900;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+}
+
+.scorecell strong {
+    font-size: 1rem;
+    line-height: 1;
+}
+
+.scorecell-primary strong {
+    font-size: 1.55rem;
+}
+
+.heatmap-legend {
+    position: absolute;
+    left: 20px;
+    bottom: 96px;
+    z-index: 9;
+    width: 268px;
+    padding: 10px 12px;
+}
+
+.heatmap-legend span {
+    display: block;
+    color: var(--text-primary);
+    font-size: 0.74rem;
+    font-weight: 900;
+    margin-bottom: 7px;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+
+.legend-ramp {
+    height: 8px;
+    border-radius: 999px;
+    background: linear-gradient(90deg, #dc2626 0%, #f59e0b 48%, #10b981 100%);
+    margin-bottom: 7px;
+}
+
+.heatmap-legend small {
+    display: block;
+    color: var(--text-secondary);
+    font-size: 0.68rem;
+    line-height: 1.35;
+}
+
+.toast-container {
+    position: absolute;
+    right: 380px;
+    bottom: 22px;
+    z-index: 30;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+}
+
+.toast {
+    min-width: 260px;
+    max-width: 360px;
+    padding: 11px 13px;
+    border-radius: 8px;
+    background: rgba(15, 23, 42, 0.92);
+    color: #ffffff;
+    box-shadow: 0 16px 34px rgba(15, 23, 42, 0.28);
+    font-size: 0.78rem;
+    line-height: 1.4;
+    animation: toast-in 0.18s ease-out;
+}
+
+.toast.success {
+    background: rgba(15, 118, 110, 0.94);
+}
+
+.toast.warning {
+    background: rgba(146, 64, 14, 0.94);
+}
+
+.toast.error {
+    background: rgba(185, 28, 28, 0.94);
+}
+
+@keyframes toast-in {
+    from {
+        transform: translateY(8px);
+        opacity: 0;
+    }
+    to {
+        transform: translateY(0);
+        opacity: 1;
+    }
 }
 
 /* Hidden Class Utility */
@@ -542,7 +731,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
 /* CRS Warning Banner */
 .warning-banner {
     position: absolute;
-    top: 20px;
+    top: 78px;
     left: 50%;
     transform: translateX(-50%);
     z-index: 1000;
@@ -707,6 +896,29 @@ input[type="range"]::-webkit-slider-thumb:hover {
 .measurement-label.temp {
     border-color: #38bdf8;
     box-shadow: 0 4px 12px rgba(0,0,0,0.5), 0 0 8px rgba(56,189,248,0.3);
+}
+
+.height-label {
+    position: absolute;
+    background: rgba(255, 255, 255, 0.92);
+    border: 1px solid rgba(15, 118, 110, 0.36);
+    color: #0f172a;
+    padding: 4px 8px;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 900;
+    pointer-events: none;
+    white-space: nowrap;
+    transform: translate(-50%, -100%);
+    margin-top: -8px;
+    box-shadow: 0 8px 18px rgba(15, 23, 42, 0.18);
+    z-index: 90;
+}
+
+.height-label.selected {
+    background: rgba(15, 118, 110, 0.96);
+    border-color: rgba(255, 255, 255, 0.42);
+    color: #ffffff;
 }
 
 /* Export Planning Report Button */
@@ -903,16 +1115,41 @@ input[type="range"]::-webkit-slider-thumb:hover {
     }
 
     #control-dock {
-        top: 166px;
+        top: 214px;
         left: 10px;
         right: 10px;
         width: auto;
-        max-height: calc(100vh - 176px);
+        max-height: calc(100vh - 224px);
         padding: 14px;
     }
 
+    .city-scorecard {
+        left: 10px;
+        right: 10px;
+        bottom: 10px;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+    }
+
+    .heatmap-legend {
+        left: 10px;
+        right: 10px;
+        bottom: 154px;
+        width: auto;
+    }
+
+    .toast-container {
+        left: 10px;
+        right: 10px;
+        bottom: 270px;
+    }
+
+    .toast {
+        min-width: 0;
+        max-width: none;
+    }
+
     .warning-banner {
-        top: 10px;
+        top: 146px;
         width: calc(100vw - 20px);
     }
 

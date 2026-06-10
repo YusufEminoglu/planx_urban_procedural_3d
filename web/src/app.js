@@ -44,6 +44,13 @@ let dragIntersectionPlane = null;
 // Setback Dragging State
 let setbackHandleMesh = null;
 let isDraggingSetback = false;
+let scaleXHandleMesh = null;
+let scaleYHandleMesh = null;
+let isDraggingScaleAxis = null;
+let dragStartScale = 1;
+let dragStartScaleDistance = 1;
+let dragScaleCenter = null;
+let dragScaleAxis = null;
 
 // Light references
 let dirLight, ambientLight;
@@ -76,6 +83,18 @@ const btnGuideInline = document.getElementById('btn-guide-inline');
 const btnGuideClose = document.getElementById('btn-guide-close');
 const guidePanelEl = document.getElementById('guide-panel');
 const guideScrimEl = document.getElementById('guide-scrim');
+const inScenarioPreset = document.getElementById('input-scenario-preset');
+const btnApplyPreset = document.getElementById('btn-apply-preset');
+const scenarioNoteEl = document.getElementById('scenario-note');
+const inHeatmapMode = document.getElementById('input-heatmap-mode');
+const cityScoreEl = document.getElementById('city-score');
+const cityComplianceRateEl = document.getElementById('city-compliance-rate');
+const cityGfaEl = document.getElementById('city-gfa');
+const cityPopulationEl = document.getElementById('city-population');
+const cityCarbonEl = document.getElementById('city-carbon');
+const legendTitleEl = document.getElementById('legend-title');
+const legendNoteEl = document.getElementById('legend-note');
+const toastContainerEl = document.getElementById('toast-container');
 
 // View settings checkbox controls
 const toggleBuildingsEl = document.getElementById('toggle-buildings');
@@ -85,6 +104,7 @@ const toggleSidewalksEl = document.getElementById('toggle-sidewalks');
 const togglePedestriansEl = document.getElementById('toggle-pedestrians');
 const toggleTrafficEl = document.getElementById('toggle-traffic');
 const toggleGridEl = document.getElementById('toggle-grid');
+const toggleHeightLabelsEl = document.getElementById('toggle-height-labels');
 
 // Input controls
 const inTypology = document.getElementById('input-typology');
@@ -93,6 +113,8 @@ const inRoofStyle = document.getElementById('input-roof-style');
 const inSetback = document.getElementById('input-setback');
 const inFloors = document.getElementById('input-floors');
 const inFloorHeight = document.getElementById('input-floorheight');
+const inScaleX = document.getElementById('input-scale-x');
+const inScaleY = document.getElementById('input-scale-y');
 const inMaxBcr = document.getElementById('input-max-bcr');
 const inMaxFar = document.getElementById('input-max-far');
 const inMaxHeight = document.getElementById('input-max-height');
@@ -110,6 +132,8 @@ const lblStepbackDepth = document.getElementById('val-stepback-depth');
 const lblSetback = document.getElementById('val-setback');
 const lblFloors = document.getElementById('val-floors');
 const lblFloorHeight = document.getElementById('val-floorheight');
+const lblScaleX = document.getElementById('val-scale-x');
+const lblScaleY = document.getElementById('val-scale-y');
 const lblMaxBcr = document.getElementById('val-max-bcr');
 const lblMaxFar = document.getElementById('val-max-far');
 const lblMaxHeight = document.getElementById('val-max-height');
@@ -121,6 +145,7 @@ const metArea = document.getElementById('prop-area');
 const metFootprint = document.getElementById('metric-footprint');
 const metGfa = document.getElementById('metric-gfa');
 const metHeight = document.getElementById('metric-height');
+const metZRange = document.getElementById('metric-z-range');
 const metBcrLabel = document.getElementById('metric-bcr-label');
 const metFarLabel = document.getElementById('metric-far-label');
 const metStatus = document.getElementById('metric-status');
@@ -136,8 +161,11 @@ const metDensity = document.getElementById('metric-density');
 
 // Sustainability Indicators elements
 const metOsr = document.getElementById('metric-osr');
+const metOpenSpace = document.getElementById('metric-open-space');
 const metCarbon = document.getElementById('metric-carbon');
 const metRunoff = document.getElementById('metric-runoff');
+const metPlanScore = document.getElementById('metric-plan-score');
+const metConstraintLoad = document.getElementById('metric-constraint-load');
 
 // Apply All button
 const btnApplyAll = document.getElementById('btn-apply-all');
@@ -145,9 +173,112 @@ const btnApplyAll = document.getElementById('btn-apply-all');
 // HUD
 const hudTotalParcels = document.getElementById('hud-total-parcels');
 const hudCrs = document.getElementById('hud-crs');
+const hudMaxZ = document.getElementById('hud-max-z');
 
 // Grid reference for toggle
 let gridHelper = null;
+let heatmapMode = 'score';
+
+const SCENARIO_PRESETS = {
+    balanced: {
+        label: 'Balanced Growth',
+        note: 'Balanced Growth keeps a compact footprint while using most available FAR.',
+        apply(item) {
+            const area = item.area;
+            const usage = area > 1400 ? 'MixedUse' : 'Residential';
+            const typology = defaultTypologyForBlock(area, usage, item.outerRing);
+            return {
+                usage,
+                typology,
+                roofStyle: defaultRoofStyleFor(usage, typology),
+                setback: area > 1200 ? 3.5 : 3.0,
+                floors: Math.min(12, Math.max(4, defaultFloorCountForBlock(area, usage) + 1)),
+                floorHeight: usage === 'MixedUse' ? 3.2 : 3.0,
+                maxBcr: 0.45,
+                maxFar: area > 1600 ? 3.2 : 2.5,
+                maxHeight: area > 1600 ? 36 : 24
+            };
+        }
+    },
+    transit: {
+        label: 'Transit-Oriented Mix',
+        note: 'Transit-Oriented Mix prioritizes mixed-use podiums, taller massing, and strong FAR utilization.',
+        apply(item) {
+            const isLarge = item.area >= 1200;
+            const typology = isLarge ? 'PodiumTower' : 'SteppedTower';
+            return {
+                usage: 'MixedUse',
+                typology,
+                roofStyle: 'Mansard',
+                setback: isLarge ? 3.0 : 2.5,
+                floors: isLarge ? 14 : 9,
+                floorHeight: 3.2,
+                maxBcr: 0.60,
+                maxFar: isLarge ? 5.5 : 4.0,
+                maxHeight: isLarge ? 62 : 42,
+                stepbackInterval: 4,
+                stepbackDepth: 1.5
+            };
+        }
+    },
+    affordable: {
+        label: 'Affordable Mid-Rise',
+        note: 'Affordable Mid-Rise favors repeatable residential blocks with efficient GFA and stable height limits.',
+        apply(item) {
+            const typology = item.area >= 1400 ? 'MultiBuildingBlock' : 'Courtyard';
+            return {
+                usage: 'Residential',
+                typology,
+                roofStyle: defaultRoofStyleFor('Residential', typology),
+                setback: 3.0,
+                floors: item.area >= 1400 ? 8 : 6,
+                floorHeight: 3.0,
+                maxBcr: 0.50,
+                maxFar: item.area >= 1400 ? 3.2 : 2.6,
+                maxHeight: item.area >= 1400 ? 30 : 24
+            };
+        }
+    },
+    green: {
+        label: 'Low-Carbon Campus',
+        note: 'Low-Carbon Campus lowers height, increases setbacks, and keeps runoff and open-space pressure visible.',
+        apply(item) {
+            const typology = item.area >= 900 ? 'Courtyard' : 'Slab';
+            return {
+                usage: 'Civic',
+                typology,
+                roofStyle: 'Gable',
+                setback: 6.0,
+                floors: item.area >= 1400 ? 4 : 3,
+                floorHeight: 3.4,
+                maxBcr: 0.35,
+                maxFar: 1.6,
+                maxHeight: 18
+            };
+        }
+    },
+    park: {
+        label: 'Public Realm Upgrade',
+        note: 'Public Realm Upgrade converts the selected parcel into open space for civic review scenarios.',
+        apply() {
+            return {
+                usage: 'Park',
+                typology: 'Tower',
+                roofStyle: 'Hipped',
+                setback: 2.0,
+                floors: 1,
+                floorHeight: 3.0,
+                maxBcr: 0.10,
+                maxFar: 0.10,
+                maxHeight: 4
+            };
+        }
+    }
+};
+
+const VALID_USAGES = ['Residential', 'Commercial', 'MixedUse', 'Civic', 'Park'];
+const VALID_TYPOLOGIES = ['Tower', 'Slab', 'Courtyard', 'LShape', 'UShape', 'PodiumTower', 'SteppedTower', 'MultiBuildingBlock'];
+const VALID_ROOF_STYLES = ['Hipped', 'Gable', 'Mansard', 'Flat'];
 
 // Initialize the 3D scene
 function init() {
@@ -387,16 +518,9 @@ function animate() {
     // Update pedestrian positions
     updatePedestrians();
 
-    // Beacon light blinking animation
-    const timeSec = Date.now() * 0.005;
-    scene.traverse(child => {
-        if (child.userData && child.userData.isBeacon) {
-            child.material.opacity = 0.2 + Math.abs(Math.sin(timeSec * 2)) * 0.8;
-        }
-    });
-
     // Update 3D ruler tool labels screen positions
     updateMeasurementLabels();
+    updateHeightLabels();
 
     composer.render();
 }
@@ -420,6 +544,8 @@ function setupInputListeners() {
         selectedParcel.params.setback = parseFloat(inSetback.value);
         selectedParcel.params.floors = parseInt(inFloors.value);
         selectedParcel.params.floorHeight = parseFloat(inFloorHeight.value);
+        selectedParcel.params.scaleX = parseFloat(inScaleX.value);
+        selectedParcel.params.scaleY = parseFloat(inScaleY.value);
         selectedParcel.params.typology = inTypology.value;
         selectedParcel.params.usage = inUsage.value;
         selectedParcel.params.roofStyle = inRoofStyle.value;
@@ -431,11 +557,14 @@ function setupInputListeners() {
         selectedParcel.params.maxBcr = parseFloat(inMaxBcr.value);
         selectedParcel.params.maxFar = parseFloat(inMaxFar.value);
         selectedParcel.params.maxHeight = parseFloat(inMaxHeight.value);
+        selectedParcel.params = sanitizeParcelParams(selectedParcel.params, selectedParcel.area, selectedParcel.outerRing);
 
         // Update labels
         lblSetback.textContent = selectedParcel.params.setback.toFixed(1);
         lblFloors.textContent = selectedParcel.params.floors;
         lblFloorHeight.textContent = selectedParcel.params.floorHeight.toFixed(1);
+        lblScaleX.textContent = selectedParcel.params.scaleX.toFixed(2);
+        lblScaleY.textContent = selectedParcel.params.scaleY.toFixed(2);
         lblMaxBcr.textContent = selectedParcel.params.maxBcr.toFixed(2);
         lblMaxFar.textContent = selectedParcel.params.maxFar.toFixed(1);
         lblMaxHeight.textContent = selectedParcel.params.maxHeight.toFixed(1);
@@ -453,6 +582,8 @@ function setupInputListeners() {
         // Rebuild meshes
         rebuildParcel3D(selectedParcel);
         updateDashboard(selectedParcel);
+        updateCitySummary();
+        updateScaleHandles();
 
         // Update height handle position or remove it if park
         if (selectedParcel.params.usage !== 'Park') {
@@ -487,6 +618,8 @@ function setupInputListeners() {
     inSetback.addEventListener('input', triggerUpdate);
     inFloors.addEventListener('input', triggerUpdate);
     inFloorHeight.addEventListener('input', triggerUpdate);
+    if (inScaleX) inScaleX.addEventListener('input', triggerUpdate);
+    if (inScaleY) inScaleY.addEventListener('input', triggerUpdate);
     inTypology.addEventListener('change', triggerUpdate);
     inUsage.addEventListener('change', triggerUpdate);
     inRoofStyle.addEventListener('change', triggerUpdate);
@@ -519,8 +652,10 @@ function setupInputListeners() {
                 rebuildParcel3D(selectedParcel);
                 selectParcel(selectedParcel);
                 updateDashboard(selectedParcel);
+                updateCitySummary();
+                showToast("Selected parcel optimized against its active zoning limits.", "success");
             } else {
-                alert("Please select a parcel first.");
+                showToast("Select a parcel first, then run Auto-Solve Selected Parcel.", "warning");
             }
         });
     }
@@ -581,6 +716,29 @@ function setupInputListeners() {
         guideScrimEl.addEventListener('click', closeGuidePanel);
     }
 
+    if (inScenarioPreset) {
+        inScenarioPreset.addEventListener('change', () => {
+            const preset = SCENARIO_PRESETS[inScenarioPreset.value] || SCENARIO_PRESETS.balanced;
+            if (scenarioNoteEl) scenarioNoteEl.textContent = preset.note;
+        });
+    }
+    if (btnApplyPreset) {
+        btnApplyPreset.addEventListener('click', () => {
+            if (!selectedParcel) {
+                showToast("Select a parcel before applying a scenario preset.", "warning");
+                return;
+            }
+            applyScenarioPreset(selectedParcel, inScenarioPreset ? inScenarioPreset.value : 'balanced');
+        });
+    }
+    if (inHeatmapMode) {
+        inHeatmapMode.addEventListener('change', () => {
+            heatmapMode = inHeatmapMode.value;
+            updateHeatmapLegend();
+            refreshParcelHeatmap();
+        });
+    }
+
     // Reload Data button
     if (btnReload) {
         btnReload.addEventListener('click', reloadData);
@@ -598,6 +756,7 @@ function setupInputListeners() {
     if (togglePedestriansEl) togglePedestriansEl.addEventListener('change', onVisibilityChange);
     if (toggleTrafficEl) toggleTrafficEl.addEventListener('change', onVisibilityChange);
     if (toggleGridEl) toggleGridEl.addEventListener('change', onVisibilityChange);
+    if (toggleHeightLabelsEl) toggleHeightLabelsEl.addEventListener('change', updateHeightLabels);
 
     // Apply All button
     if (btnApplyAll) {
@@ -632,6 +791,351 @@ function closeGuidePanel() {
     }
     if (guideScrimEl) {
         guideScrimEl.classList.add('hidden');
+    }
+}
+
+function showToast(message, tone = 'success') {
+    if (!toastContainerEl) {
+        console.log(message);
+        return;
+    }
+    const toast = document.createElement('div');
+    toast.className = `toast ${tone}`;
+    toast.textContent = message;
+    toastContainerEl.appendChild(toast);
+    setTimeout(() => {
+        toast.style.opacity = '0';
+        toast.style.transform = 'translateY(8px)';
+        setTimeout(() => toast.remove(), 220);
+    }, 3600);
+}
+
+function clamp01(value) {
+    if (!Number.isFinite(value)) return 0;
+    return Math.max(0, Math.min(1, value));
+}
+
+function clampNumber(value, min, max, fallback) {
+    const parsed = Number.isFinite(value) ? value : fallback;
+    return Math.max(min, Math.min(max, parsed));
+}
+
+function readProp(props, names) {
+    if (!props) return undefined;
+    for (const name of names) {
+        if (Object.prototype.hasOwnProperty.call(props, name)) {
+            const value = props[name];
+            if (value !== null && value !== undefined && String(value).trim() !== '' && String(value).toLowerCase() !== 'null') {
+                return value;
+            }
+        }
+    }
+
+    const lowerNames = names.map(name => name.toLowerCase());
+    for (const [key, value] of Object.entries(props)) {
+        if (!lowerNames.includes(key.toLowerCase())) continue;
+        if (value !== null && value !== undefined && String(value).trim() !== '' && String(value).toLowerCase() !== 'null') {
+            return value;
+        }
+    }
+    return undefined;
+}
+
+function parseFiniteNumber(value, fallback) {
+    if (value === null || value === undefined) return fallback;
+    if (typeof value === 'string') {
+        const trimmed = value.trim();
+        if (!trimmed || trimmed.toLowerCase() === 'null') return fallback;
+        value = trimmed.replace(',', '.');
+    }
+    const parsed = Number(value);
+    return Number.isFinite(parsed) ? parsed : fallback;
+}
+
+function parseNumberProp(props, names, fallback) {
+    return parseFiniteNumber(readProp(props, names), fallback);
+}
+
+function parseIntegerProp(props, names, fallback) {
+    const parsed = parseFiniteNumber(readProp(props, names), fallback);
+    return Number.isFinite(parsed) ? Math.round(parsed) : fallback;
+}
+
+function normalizeUsage(value, fallback = 'Residential') {
+    if (value === null || value === undefined || String(value).trim() === '') return fallback;
+    const raw = String(value).trim();
+    const compact = raw.toLowerCase().replace(/[\s_\-]+/g, '');
+    const exact = VALID_USAGES.find(usage => usage.toLowerCase() === compact);
+    if (exact) return exact;
+    const usageMap = {
+        residential: 'Residential',
+        housing: 'Residential',
+        konut: 'Residential',
+        commercial: 'Commercial',
+        retail: 'Commercial',
+        office: 'Commercial',
+        ticaret: 'Commercial',
+        mixed: 'MixedUse',
+        mixeduse: 'MixedUse',
+        karma: 'MixedUse',
+        civic: 'Civic',
+        institutional: 'Civic',
+        public: 'Civic',
+        donati: 'Civic',
+        park: 'Park',
+        greenspace: 'Park',
+        yesilalan: 'Park',
+        open: 'Park',
+        openspace: 'Park'
+    };
+    return usageMap[compact] || fallback;
+}
+
+function normalizeTypology(value, fallback = 'Tower') {
+    if (value === null || value === undefined || String(value).trim() === '') return fallback;
+    const compact = String(value).trim().toLowerCase().replace(/[\s_\-\/]+/g, '');
+    const exact = VALID_TYPOLOGIES.find(typology => typology.toLowerCase() === compact);
+    if (exact) return exact;
+    const typologyMap = {
+        tower: 'Tower',
+        slab: 'Slab',
+        row: 'Slab',
+        courtyard: 'Courtyard',
+        avlu: 'Courtyard',
+        l: 'LShape',
+        lshape: 'LShape',
+        u: 'UShape',
+        ushape: 'UShape',
+        podium: 'PodiumTower',
+        podiumtower: 'PodiumTower',
+        stepped: 'SteppedTower',
+        steppedtower: 'SteppedTower',
+        multibuilding: 'MultiBuildingBlock',
+        multibuildingblock: 'MultiBuildingBlock',
+        block: 'MultiBuildingBlock'
+    };
+    return typologyMap[compact] || fallback;
+}
+
+function normalizeRoofStyle(value, fallback = 'Hipped') {
+    if (value === null || value === undefined || String(value).trim() === '') return fallback;
+    const compact = String(value).trim().toLowerCase().replace(/[\s_\-]+/g, '');
+    const exact = VALID_ROOF_STYLES.find(style => style.toLowerCase() === compact);
+    return exact || fallback;
+}
+
+function sanitizeParcelParams(params, area, ring) {
+    const usage = normalizeUsage(params.usage, 'Residential');
+    const defaultTypology = defaultTypologyForBlock(area, usage, ring);
+    const typology = normalizeTypology(params.typology, defaultTypology);
+    const floorHeight = clampNumber(parseFiniteNumber(params.floorHeight, 3.0), 2.5, 6.0, 3.0);
+    const defaultFloors = defaultFloorCountForBlock(area, usage);
+    const floors = usage === 'Park'
+        ? 1
+        : clampNumber(Math.round(parseFiniteNumber(params.floors, defaultFloors)), 1, 30, defaultFloors);
+    const roofStyle = normalizeRoofStyle(params.roofStyle, defaultRoofStyleFor(usage, typology));
+
+    return {
+        setback: clampNumber(parseFiniteNumber(params.setback, 3.0), 0, 15, 3.0),
+        floors,
+        floorHeight,
+        typology,
+        usage,
+        roofStyle,
+        scaleX: clampNumber(parseFiniteNumber(params.scaleX, 1.0), 0.35, 1.60, 1.0),
+        scaleY: clampNumber(parseFiniteNumber(params.scaleY, 1.0), 0.35, 1.60, 1.0),
+        stepbackInterval: clampNumber(Math.round(parseFiniteNumber(params.stepbackInterval, 4)), 2, 10, 4),
+        stepbackDepth: clampNumber(parseFiniteNumber(params.stepbackDepth, 1.5), 0.5, 5.0, 1.5),
+        maxBcr: clampNumber(parseFiniteNumber(params.maxBcr, 0.45), 0.1, 0.9, 0.45),
+        maxFar: clampNumber(parseFiniteNumber(params.maxFar, 2.5), 0.5, 8.0, 2.5),
+        maxHeight: clampNumber(parseFiniteNumber(params.maxHeight, 18.0), 3.0, 120.0, 18.0)
+    };
+}
+
+function scoreClass(score) {
+    if (score >= 76) return 'score-good';
+    if (score >= 55) return 'score-watch';
+    return 'score-poor';
+}
+
+function calculateConstraintLoad(metrics, item) {
+    const maxBcr = Math.max(0.01, item.params.maxBcr || 0.45);
+    const maxFar = Math.max(0.01, item.params.maxFar || 2.5);
+    const maxHeight = Math.max(0.01, item.params.maxHeight || 18);
+    const heightLoad = metrics.usage === 'Park' ? 0 : metrics.height / maxHeight;
+    return Math.max(metrics.bcr / maxBcr, metrics.far / maxFar, heightLoad);
+}
+
+function calculatePlanScore(metrics, item) {
+    const maxBcr = Math.max(0.01, item.params.maxBcr || 0.45);
+    const maxFar = Math.max(0.01, item.params.maxFar || 2.5);
+    const maxHeight = Math.max(0.01, item.params.maxHeight || 18);
+    const farUtilization = clamp01(metrics.far / maxFar);
+    const openSpaceShare = clamp01(metrics.openSpaceArea / Math.max(1, item.area));
+    const runoffScore = clamp01(1 - metrics.runoff);
+    const densityScore = metrics.usage === 'Park'
+        ? 0.82
+        : clamp01(metrics.densityPpHa / 650);
+
+    const bcrExcess = Math.max(0, (metrics.bcr - maxBcr) / maxBcr);
+    const farExcess = Math.max(0, (metrics.far - maxFar) / maxFar);
+    const heightExcess = metrics.usage === 'Park' ? 0 : Math.max(0, (metrics.height - maxHeight) / maxHeight);
+    const zeroFootprintPenalty = metrics.usage !== 'Park' && metrics.footprintArea <= 0 ? 28 : 0;
+    const violationPenalty = Math.min(55, bcrExcess * 28 + farExcess * 34 + heightExcess * 26 + zeroFootprintPenalty);
+
+    const score = 42
+        + farUtilization * 24
+        + openSpaceShare * 16
+        + runoffScore * 10
+        + densityScore * 8
+        - violationPenalty;
+
+    return Math.round(Math.max(0, Math.min(100, score)));
+}
+
+function formatCompactNumber(value, unit = '') {
+    const abs = Math.abs(value);
+    let text;
+    if (abs >= 1000000) text = `${(value / 1000000).toFixed(1)}M`;
+    else if (abs >= 10000) text = `${Math.round(value / 1000)}k`;
+    else if (abs >= 1000) text = `${(value / 1000).toFixed(1)}k`;
+    else text = Math.round(value).toLocaleString();
+    return unit ? `${text} ${unit}` : text;
+}
+
+function lerpColorHex(colorA, colorB, t) {
+    const a = new THREE.Color(colorA);
+    const b = new THREE.Color(colorB);
+    return a.lerp(b, clamp01(t)).getHex();
+}
+
+function colorForParcel(item) {
+    const metrics = calculateParcelMetrics(item);
+    if (selectedParcel === item && heatmapMode === 'compliance') {
+        return metrics.violated ? 0xb91c1c : 0x0d9488;
+    }
+    if (item.params.usage === 'Park' && heatmapMode !== 'density' && heatmapMode !== 'carbon') {
+        return 0x047857;
+    }
+
+    if (heatmapMode === 'density') {
+        const t = clamp01(metrics.densityPpHa / 800);
+        return t < 0.5
+            ? lerpColorHex(0x0ea5e9, 0xf59e0b, t * 2)
+            : lerpColorHex(0xf59e0b, 0x7c3aed, (t - 0.5) * 2);
+    }
+    if (heatmapMode === 'carbon') {
+        const carbonPerSqm = metrics.gfa > 0 ? metrics.carbon / metrics.gfa : 0;
+        const t = clamp01(carbonPerSqm / 0.08);
+        return t < 0.5
+            ? lerpColorHex(0x10b981, 0xf59e0b, t * 2)
+            : lerpColorHex(0xf59e0b, 0xdc2626, (t - 0.5) * 2);
+    }
+    if (heatmapMode === 'compliance') {
+        return metrics.violated ? 0x7f1d1d : 0x334155;
+    }
+
+    const score = metrics.planScore !== undefined ? metrics.planScore : calculatePlanScore(metrics, item);
+    if (score < 55) return lerpColorHex(0x7f1d1d, 0xf59e0b, score / 55);
+    return lerpColorHex(0xf59e0b, 0x10b981, (score - 55) / 45);
+}
+
+function refreshParcelHeatmap() {
+    parcelFeatures.forEach(item => {
+        if (item.parcelMesh && item.parcelMesh.material) {
+            item.parcelMesh.material.color.setHex(colorForParcel(item));
+        }
+    });
+}
+
+function updateHeatmapLegend() {
+    if (!legendTitleEl || !legendNoteEl) return;
+    const labels = {
+        score: ['Score heatmap', 'Red underperforms, amber is watchlist, green is strong.'],
+        compliance: ['Compliance heatmap', 'Slate is compliant, red indicates active BCR/FAR/height conflict.'],
+        density: ['Density heatmap', 'Blue is lower intensity, amber is mid-rise, violet is high-density.'],
+        carbon: ['Carbon heatmap', 'Green is lower operational carbon intensity, red is heavier impact.']
+    };
+    const selected = labels[heatmapMode] || labels.score;
+    legendTitleEl.textContent = selected[0];
+    legendNoteEl.textContent = selected[1];
+}
+
+function updateCitySummary() {
+    if (!parcelFeatures || parcelFeatures.length === 0) {
+        if (cityScoreEl) cityScoreEl.textContent = '-';
+        return;
+    }
+
+    const metricsList = parcelFeatures.map(item => calculateParcelMetrics(item));
+    const compliantCount = metricsList.filter(metrics => !metrics.violated).length;
+    const totalGfa = metricsList.reduce((sum, metrics) => sum + metrics.gfa, 0);
+    const totalPopulation = metricsList.reduce((sum, metrics) => sum + metrics.population, 0);
+    const totalCarbon = metricsList.reduce((sum, metrics) => sum + metrics.carbon, 0);
+    const totalOpenSpace = metricsList.reduce((sum, metrics) => sum + metrics.openSpaceArea, 0);
+    const maxZ = metricsList.reduce((max, metrics) => Math.max(max, metrics.height || 0), 0);
+    const avgScore = Math.round(metricsList.reduce((sum, metrics) => sum + metrics.planScore, 0) / metricsList.length);
+    const complianceRate = Math.round((compliantCount / metricsList.length) * 100);
+
+    if (cityScoreEl) {
+        cityScoreEl.textContent = String(avgScore);
+        cityScoreEl.className = scoreClass(avgScore);
+    }
+    if (cityComplianceRateEl) cityComplianceRateEl.textContent = `${complianceRate}%`;
+    if (cityGfaEl) cityGfaEl.textContent = formatCompactNumber(totalGfa, 'sqm');
+    if (cityPopulationEl) cityPopulationEl.textContent = formatCompactNumber(totalPopulation);
+    if (cityCarbonEl) cityCarbonEl.textContent = formatCompactNumber(totalCarbon, 't');
+    if (hudMaxZ) hudMaxZ.textContent = `${maxZ.toFixed(1)} m`;
+
+    window.planxCitySummary = {
+        score: avgScore,
+        compliantCount,
+        parcelCount: parcelFeatures.length,
+        complianceRate,
+        totalGfa,
+        totalPopulation,
+        totalCarbon,
+        totalOpenSpace,
+        maxZ
+    };
+    refreshParcelHeatmap();
+}
+
+function applyScenarioPreset(item, presetKey) {
+    const preset = SCENARIO_PRESETS[presetKey] || SCENARIO_PRESETS.balanced;
+    const updates = preset.apply(item);
+    item.params = {
+        ...item.params,
+        ...updates
+    };
+    item.modified = true;
+    rebuildParcel3D(item);
+    selectParcel(item);
+    updateDashboard(item);
+    updateCitySummary();
+    showToast(`${preset.label} applied to parcel ${item.fid}.`, "success");
+}
+
+function focusParcelCamera(item, options = {}) {
+    if (!item || !camera || !controls) return;
+    const metrics = calculateParcelMetrics(item);
+    const bounds = getRingBounds(item.outerRing);
+    const maxDim = Math.max(bounds.width, bounds.depth, 18);
+    const height = Math.max(metrics.height, 8);
+    const target = new THREE.Vector3(bounds.cx, Math.min(height * 0.45, 32), -bounds.cy);
+    const distance = Math.max(55, Math.min(420, maxDim * 2.2 + height * 1.8));
+    const currentDir = new THREE.Vector3().subVectors(camera.position, controls.target);
+    if (currentDir.lengthSq() < 0.001) currentDir.set(0.55, 0.42, 0.95);
+    currentDir.normalize();
+    currentDir.y = Math.max(0.34, currentDir.y);
+    currentDir.normalize();
+
+    controls.target.copy(target);
+    camera.position.copy(target).add(currentDir.multiplyScalar(distance));
+    controls.update();
+
+    if (options.toast) {
+        showToast(`Focused parcel ${item.fid}: Z top ${metrics.height.toFixed(1)} m.`, "success");
     }
 }
 
@@ -1053,6 +1557,89 @@ function getRingBounds(ring) {
     };
 }
 
+function buildFallbackFootprintRing(ring, requestedSetback = 0) {
+    if (!ring || ring.length < 3) return null;
+    const ob = getOrientedBounds(ring);
+    if (!Number.isFinite(ob.W) || !Number.isFinite(ob.H) || ob.W <= 0.2 || ob.H <= 0.2) return null;
+
+    const minDim = Math.min(ob.W, ob.H);
+    const safeMargin = Math.max(0, Math.min(parseFiniteNumber(requestedSetback, 0), minDim * 0.28));
+    let halfW = (ob.W / 2) - safeMargin;
+    let halfH = (ob.H / 2) - safeMargin;
+
+    if (!Number.isFinite(halfW) || halfW < 0.35) halfW = Math.max(0.35, ob.W * 0.34);
+    if (!Number.isFinite(halfH) || halfH < 0.35) halfH = Math.max(0.35, ob.H * 0.34);
+
+    halfW = Math.min(halfW, ob.W * 0.46);
+    halfH = Math.min(halfH, ob.H * 0.46);
+
+    const localCorners = [
+        { x: -halfW, y: -halfH },
+        { x: halfW, y: -halfH },
+        { x: halfW, y: halfH },
+        { x: -halfW, y: halfH }
+    ];
+
+    return localCorners.map(pt => ({
+        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
+        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
+    }));
+}
+
+function resolveBuildableRing(item, requestedSetback) {
+    const setback = Math.max(0, parseFiniteNumber(requestedSetback, 0));
+    const candidates = [setback, setback * 0.75, setback * 0.5, setback * 0.25, Math.min(1.0, setback), 0];
+    const seen = new Set();
+
+    for (const candidate of candidates) {
+        const rounded = Math.max(0, Math.round(candidate * 100) / 100);
+        if (seen.has(rounded)) continue;
+        seen.add(rounded);
+        const ring = offsetPolygonRing(item.outerRing, rounded);
+        if (ring && ring.length >= 3 && calculatePolygonArea(ring) > 0.05) {
+            return {
+                ring,
+                effectiveSetback: rounded,
+                usedFallback: rounded !== setback
+            };
+        }
+    }
+
+    const fallbackRing = buildFallbackFootprintRing(item.outerRing, setback);
+    if (fallbackRing && fallbackRing.length >= 3 && calculatePolygonArea(fallbackRing) > 0.05) {
+        return {
+            ring: fallbackRing,
+            effectiveSetback: 0,
+            usedFallback: true
+        };
+    }
+
+    return {
+        ring: null,
+        effectiveSetback: setback,
+        usedFallback: true
+    };
+}
+
+function scaleRingInLocalAxes(ring, scaleX = 1, scaleY = 1) {
+    if (!ring || ring.length < 3) return ring;
+    const sx = clampNumber(parseFiniteNumber(scaleX, 1), 0.35, 1.60, 1);
+    const sy = clampNumber(parseFiniteNumber(scaleY, 1), 0.35, 1.60, 1);
+    if (Math.abs(sx - 1) < 0.001 && Math.abs(sy - 1) < 0.001) return ring;
+
+    const ob = getOrientedBounds(ring);
+    return ring.map(pt => {
+        const rx = pt.x - ob.cx;
+        const ry = pt.y - ob.cy;
+        const lx = rx * ob.ux + ry * ob.uy;
+        const ly = rx * ob.nx + ry * ob.ny;
+        return {
+            x: ob.cx + (lx * sx) * ob.ux + (ly * sy) * ob.nx,
+            y: ob.cy + (lx * sx) * ob.uy + (ly * sy) * ob.ny
+        };
+    });
+}
+
 function resizeGroundForCity(maxDim) {
     const groundSize = Math.max(2400, Math.min(80000, maxDim * 2.4));
     if (groundMesh) {
@@ -1139,11 +1726,17 @@ function fitCameraToCity(bounds) {
 function updateSceneDebug(bounds, fallbackReason = null) {
     const buildingCount = parcelFeatures.filter(item => !!item.buildingMesh).length;
     const parcelGroundCount = parcelFeatures.filter(item => !!item.parcelMesh).length;
+    const buildingHeights = parcelFeatures.map(item => {
+        const params = sanitizeParcelParams(item.params || {}, item.area || 0, item.outerRing || []);
+        return params.usage === 'Park' ? 0 : params.floors * params.floorHeight;
+    });
     window.planxDebug = {
         ...(window.planxDebug || {}),
         parcelFeatures: parcelFeatures.length,
         parcelGroundCount,
         buildingCount,
+        maxBuildingHeight: buildingHeights.length ? Math.max(...buildingHeights) : 0,
+        fallbackFootprints: parcelFeatures.filter(item => item.usedFootprintFallback).length,
         roadMeshes: roadMeshes.length,
         intersectionMeshes: intersectionMeshes.length,
         trafficCars: trafficCars.length,
@@ -1221,24 +1814,31 @@ function parseGeoJSON(data, options = {}) {
         // Calculate parcel area
         const area = calculatePolygonArea(localPoints);
         if (!Number.isFinite(area) || area <= 0.01) return;
-        const usage = props.usage !== undefined ? props.usage : 'Residential';
-        const typology = props.typology !== undefined ? props.typology : defaultTypologyForBlock(area, usage, localPoints);
+        const usage = normalizeUsage(readProp(props, ['usage', 'use', 'landuse', 'land_use', 'kullanim', 'fonksiyon']), 'Residential');
+        const typology = normalizeTypology(readProp(props, ['typology', 'type', 'building_type', 'form']), defaultTypologyForBlock(area, usage, localPoints));
+        const floorHeight = parseNumberProp(props, ['floor_h', 'floor_height', 'floorheight', 'kat_yuk', 'kat_yuksekligi'], 3.0);
+        const heightMeters = parseNumberProp(props, ['height_m', 'height', 'z_top', 'yukseklik', 'hmax'], null);
+        const defaultFloors = Number.isFinite(heightMeters) && heightMeters > 0
+            ? Math.max(1, Math.round(heightMeters / Math.max(2.5, floorHeight)))
+            : defaultFloorCountForBlock(area, usage);
 
         // Initial params (fall back to layer attributes if existing)
-        const params = {
-            setback: props.setback !== undefined ? parseFloat(props.setback) : 3.0,
-            floors: props.floors !== undefined ? parseInt(props.floors) : defaultFloorCountForBlock(area, usage),
-            floorHeight: props.floor_h !== undefined ? parseFloat(props.floor_h) : (props.floor_height !== undefined ? parseFloat(props.floor_height) : 3.0),
+        const params = sanitizeParcelParams({
+            setback: parseNumberProp(props, ['setback', 'setback_m', 'cekme'], 3.0),
+            floors: parseIntegerProp(props, ['floors', 'floor_count', 'kat', 'kat_adedi', 'kat_sayisi', 'n_kat'], defaultFloors),
+            floorHeight,
             typology,
             usage,
-            roofStyle: props.roof_style !== undefined ? props.roof_style : defaultRoofStyleFor(usage, typology),
-            stepbackInterval: props.stepback_i !== undefined ? parseInt(props.stepback_i) : 4,
-            stepbackDepth: props.stepback_d !== undefined ? parseFloat(props.stepback_d) : 1.5,
+            roofStyle: readProp(props, ['roof_style', 'roof', 'roofstyle']),
+            scaleX: parseNumberProp(props, ['scale_x', 'mass_x', 'x_scale', 'width_scale'], 1.0),
+            scaleY: parseNumberProp(props, ['scale_y', 'mass_y', 'y_scale', 'depth_scale'], 1.0),
+            stepbackInterval: parseIntegerProp(props, ['stepback_i', 'stepback_interval'], 4),
+            stepbackDepth: parseNumberProp(props, ['stepback_d', 'stepback_depth'], 1.5),
             // Zoning constraints
-            maxBcr: props.max_bcr !== undefined ? parseFloat(props.max_bcr) : 0.45,
-            maxFar: props.max_far !== undefined ? parseFloat(props.max_far) : 2.5,
-            maxHeight: props.max_height !== undefined ? parseFloat(props.max_height) : 18.0
-        };
+            maxBcr: parseNumberProp(props, ['max_bcr', 'bcr_max', 'emsal_taban'], 0.45),
+            maxFar: parseNumberProp(props, ['max_far', 'far_max', 'emsal', 'kaks'], 2.5),
+            maxHeight: parseNumberProp(props, ['max_height', 'height_limit', 'hmax', 'z_limit'], 18.0)
+        }, area, localPoints);
 
         const item = {
             fid,
@@ -1276,15 +1876,22 @@ function parseGeoJSON(data, options = {}) {
 
     const fit = fitCameraToCity(bounds);
     updateSceneDebug({ ...bounds, maxDim: fit.maxDim, focusDim: fit.focusDim }, options.fallbackReason || null);
+    updateHeatmapLegend();
+    updateCitySummary();
     return true;
 }
 
 // Dynamic color updates for parcel grounds representing zoning compliance
 function updateParcelGroundColor(item, hasViolation) {
     if (!item.parcelMesh || !item.parcelMesh.material) return;
-    
-    let colorHex = 0x334155; // default unselected compliant slate grey
-    
+
+    if (heatmapMode !== 'compliance') {
+        item.parcelMesh.material.color.setHex(colorForParcel(item));
+        return;
+    }
+
+    let colorHex = 0x334155;
+
     if (item.params.usage === 'Park') {
         colorHex = 0x064e3b; // soft forest green for public parks
     } else if (selectedParcel === item) {
@@ -1436,6 +2043,8 @@ function buildSidewalk(item) {
 
 // Rebuild building massing, zoning envelopes, and setback lines based on params
 function rebuildParcel3D(item) {
+    item.params = sanitizeParcelParams(item.params || {}, item.area, item.outerRing);
+
     // 1. Clear old models
     if (item.buildingMesh) {
         scene.remove(item.buildingMesh);
@@ -1469,22 +2078,31 @@ function rebuildParcel3D(item) {
     const typology = item.params.typology;
     const usage = item.params.usage;
 
-    // 2. Generate Inset Setback Shape
-    const insetRing = offsetPolygonRing(item.outerRing, setback);
+    // 2. Generate Inset Setback Shape. If the requested setback eats the parcel,
+    // keep rendering a safe 3D massing footprint instead of leaving a flat plan.
+    const requestedInsetRing = offsetPolygonRing(item.outerRing, setback);
+    const buildable = resolveBuildableRing(item, setback);
+    const insetRing = scaleRingInLocalAxes(buildable.ring, item.params.scaleX, item.params.scaleY);
+    item.usedFootprintFallback = !!buildable.usedFallback;
     if (!insetRing || insetRing.length < 3) {
         drawSetbackErrorLine(item);
+        removeHeightLabel(item);
         return;
     }
 
-    // Draw setback guideline
-    const setbackPoints = insetRing.map(pt => new THREE.Vector3(pt.x, 0.1, -pt.y));
-    setbackPoints.push(setbackPoints[0].clone());
-    const sbGeom = new THREE.BufferGeometry().setFromPoints(setbackPoints);
-    const sbMat = new THREE.LineDashedMaterial({ color: 0x14b8a6, dashSize: 2, gapSize: 1.5 });
-    const sbLine = new THREE.Line(sbGeom, sbMat);
-    sbLine.computeLineDistances();
-    scene.add(sbLine);
-    item.setbackMesh = sbLine;
+    if (requestedInsetRing && requestedInsetRing.length >= 3) {
+        // Draw requested setback guideline
+        const setbackPoints = requestedInsetRing.map(pt => new THREE.Vector3(pt.x, 0.1, -pt.y));
+        setbackPoints.push(setbackPoints[0].clone());
+        const sbGeom = new THREE.BufferGeometry().setFromPoints(setbackPoints);
+        const sbMat = new THREE.LineDashedMaterial({ color: 0x14b8a6, dashSize: 2, gapSize: 1.5 });
+        const sbLine = new THREE.Line(sbGeom, sbMat);
+        sbLine.computeLineDistances();
+        scene.add(sbLine);
+        item.setbackMesh = sbLine;
+    } else {
+        drawSetbackErrorLine(item);
+    }
 
     const buildingGroup = new THREE.Group();
     buildingGroup.userData = { parcelItem: item };
@@ -1580,6 +2198,7 @@ function rebuildParcel3D(item) {
         }
 
         buildZoningEnvelope(item, insetRing, item.params.maxHeight, false);
+        removeHeightLabel(item);
         return;
     }
 
@@ -2172,6 +2791,7 @@ function rebuildParcel3D(item) {
 
         scene.add(buildingGroup);
         item.buildingMesh = buildingGroup;
+        ensureHeightLabel(item, height);
     }
 
     const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
@@ -2850,7 +3470,7 @@ function buildMansardRoof(parentMesh, footprintPoints, height) {
     parentMesh.add(capMesh);
 }
 
-// Flat roof details (helipad, HVAC boxes, beacon lights)
+// Flat roof details (helipad, HVAC boxes, solar panels)
 function addRooftopDetails(parentMesh, insetRing, height, usage) {
     let cx = 0, cy = 0;
     insetRing.forEach(pt => { cx += pt.x; cy += pt.y; });
@@ -2864,18 +3484,6 @@ function addRooftopDetails(parentMesh, insetRing, height, usage) {
     penthouse.position.set(cx, height + 1.5, -cy);
     penthouse.castShadow = true;
     parentMesh.add(penthouse);
-
-    // Beacon warning light on penthouse top (blinking red warning beacon)
-    const beaconGeom = new THREE.SphereGeometry(0.3, 8, 8);
-    const beaconMat = new THREE.MeshBasicMaterial({ color: 0xef4444, transparent: true });
-    const beacon = new THREE.Mesh(beaconGeom, beaconMat);
-    beacon.position.set(0, 1.7, 0);
-    beacon.userData = { isBeacon: true };
-    penthouse.add(beacon);
-
-    // Glowing pointlight
-    const beaconLight = new THREE.PointLight(0xef4444, 2, 20);
-    beacon.add(beaconLight);
 
     // HVAC boxes
     const hvacGeom = new THREE.BoxGeometry(2, 1.2, 2);
@@ -3583,6 +4191,9 @@ function generateTrafficCars() {
 
 // Drive cars along inferred road centerlines
 function updateTraffic() {
+    let maxHeadingError = 0;
+    let headingChecks = 0;
+
     trafficCars.forEach(car => {
         if (car.path && car.path.length === 2) {
             car.progress += car.speed * car.direction;
@@ -3598,8 +4209,10 @@ function updateTraffic() {
             car.carMesh.position.set(x, 0.05, -y);
             const dx = pt2.x - pt1.x;
             const dy = pt2.y - pt1.y;
-            const heading = Math.atan2(-dy, dx) + (car.direction < 0 ? Math.PI : 0);
+            const heading = Math.atan2(dy, dx) + (car.direction < 0 ? Math.PI : 0);
             car.carMesh.rotation.y = heading;
+            maxHeadingError = Math.max(maxHeadingError, Math.abs(normalizeAngleDelta(car.carMesh.rotation.y - heading)));
+            headingChecks++;
             return;
         }
 
@@ -3624,9 +4237,19 @@ function updateTraffic() {
         // Calculate heading rotation
         const dx = pt2.x - pt1.x;
         const dy = pt2.y - pt1.y;
-        const heading = Math.atan2(-dy, dx);
+        const heading = Math.atan2(dy, dx);
         car.carMesh.rotation.y = heading;
+        maxHeadingError = Math.max(maxHeadingError, Math.abs(normalizeAngleDelta(car.carMesh.rotation.y - heading)));
+        headingChecks++;
     });
+
+    if (window.planxDebug) {
+        window.planxDebug.trafficHeadingMaxError = headingChecks > 0 ? Number(maxHeadingError.toFixed(6)) : 0;
+    }
+}
+
+function normalizeAngleDelta(angle) {
+    return Math.atan2(Math.sin(angle), Math.cos(angle));
 }
 
 // Helper to traverse up the parent chain to find the associated parcel item
@@ -3698,6 +4321,8 @@ function onDocumentClick(event) {
 
 // Handle parcel selection, loading values to sliders
 function selectParcel(item) {
+    item.params = sanitizeParcelParams(item.params || {}, item.area, item.outerRing);
+
     if (selectedParcel) {
         setBuildingHighlight(selectedParcel.buildingMesh, false);
     }
@@ -3709,6 +4334,8 @@ function selectParcel(item) {
     inSetback.value = item.params.setback;
     inFloors.value = item.params.floors;
     inFloorHeight.value = item.params.floorHeight;
+    if (inScaleX) inScaleX.value = item.params.scaleX || 1.0;
+    if (inScaleY) inScaleY.value = item.params.scaleY || 1.0;
     inTypology.value = item.params.typology;
     inUsage.value = item.params.usage;
     inRoofStyle.value = roofStyleForItem(item);
@@ -3725,6 +4352,8 @@ function selectParcel(item) {
     lblSetback.textContent = item.params.setback.toFixed(1);
     lblFloors.textContent = item.params.floors;
     lblFloorHeight.textContent = item.params.floorHeight.toFixed(1);
+    if (lblScaleX) lblScaleX.textContent = (item.params.scaleX || 1.0).toFixed(2);
+    if (lblScaleY) lblScaleY.textContent = (item.params.scaleY || 1.0).toFixed(2);
     lblMaxBcr.textContent = item.params.maxBcr.toFixed(2);
     lblMaxFar.textContent = item.params.maxFar.toFixed(1);
     lblMaxHeight.textContent = item.params.maxHeight.toFixed(1);
@@ -3746,6 +4375,8 @@ function selectParcel(item) {
     controlsEl.classList.remove('hidden');
 
     updateDashboard(item);
+    updateHeightLabels();
+    focusParcelCamera(item);
 
     // Spawn 3D arrow height handle on top of building and setback handle on ground
     if (item.params.usage !== 'Park') {
@@ -3764,12 +4395,15 @@ function selectParcel(item) {
             const pt1 = insetRing[0];
             const pt2 = insetRing[1];
             spawnSetbackHandle((pt1.x + pt2.x) / 2, (pt1.y + pt2.y) / 2);
+            spawnScaleHandles(item);
         } else {
             removeSetbackHandle();
+            removeScaleHandles();
         }
     } else {
         removeHeightHandle();
         removeSetbackHandle();
+        removeScaleHandles();
     }
 }
 
@@ -3781,6 +4415,7 @@ function deselectParcel() {
         selectedParcel = null;
         removeHeightHandle();
         removeSetbackHandle();
+        removeScaleHandles();
         rebuildParcel3D(prevSelected);
     }
 
@@ -3812,14 +4447,16 @@ function setBuildingHighlight(meshOrGroup, isSelected) {
 }
 
 function calculateParcelMetrics(item) {
+    item.params = sanitizeParcelParams(item.params || {}, item.area, item.outerRing);
     const params = item.params || {};
     const setback = parseFloat(params.setback) || 0;
-    const floors = parseInt(params.floors) || 0;
+    const floors = parseInt(params.floors) || 1;
     const floorHeight = parseFloat(params.floorHeight) || 3.0;
     const typology = params.typology || 'Tower';
     const usage = params.usage || 'Residential';
     const height = usage === 'Park' ? 0 : floors * floorHeight;
-    const insetRing = offsetPolygonRing(item.outerRing, setback);
+    const buildable = resolveBuildableRing(item, setback);
+    const insetRing = scaleRingInLocalAxes(buildable.ring, params.scaleX, params.scaleY);
     let footprintArea = 0;
     let gfa = 0;
 
@@ -3957,7 +4594,8 @@ function calculateParcelMetrics(item) {
     }
 
     const densityPpHa = item.area > 0 ? Math.round(population / (item.area / 10000)) : 0;
-    const osr = gfa > 0 ? ((item.area - footprintArea) / gfa) : 0;
+    const openSpaceArea = Math.max(0, item.area - footprintArea);
+    const osr = gfa > 0 ? (openSpaceArea / gfa) : 0;
     let carbonFactor = 0;
     if (usage === 'Residential') carbonFactor = 0.045;
     else if (usage === 'MixedUse') carbonFactor = 0.055;
@@ -3966,7 +4604,7 @@ function calculateParcelMetrics(item) {
     const carbon = gfa * carbonFactor;
     const runoff = bcr * 0.90 + (1 - bcr) * 0.15;
 
-    return {
+    const result = {
         setback,
         floors,
         floorHeight,
@@ -3983,219 +4621,65 @@ function calculateParcelMetrics(item) {
         dwellingUnits,
         population,
         densityPpHa,
+        openSpaceArea,
         osr,
         carbon,
-        runoff
+        runoff,
+        constraintLoad: 0,
+        planScore: 0
     };
+    result.constraintLoad = calculateConstraintLoad(result, item);
+    result.planScore = calculatePlanScore(result, item);
+    return result;
 }
 
 // Live calculation of regulatory compliance metrics (FAR, BCR, Height)
 function updateDashboard(item) {
-    const setback = item.params.setback;
-    const floors = item.params.floors;
-    const height = floors * item.params.floorHeight;
-    
-    // Calculate footprint area
-    const insetRing = offsetPolygonRing(item.outerRing, setback);
-    let footprintArea = 0;
-    let gfa = 0;
-    
-    if (item.params.usage === 'Park') {
-        footprintArea = 0;
-        gfa = 0;
-    } else if (insetRing && insetRing.length >= 3) {
-        if (item.params.typology === 'Courtyard') {
-            const innerSetback = 8;
-            const innerRing = offsetPolygonRing(insetRing, innerSetback);
-            const outerArea = calculatePolygonArea(insetRing);
-            const innerArea = innerRing ? calculatePolygonArea(innerRing) : 0;
-            footprintArea = Math.max(0, outerArea - innerArea);
-            gfa = footprintArea * floors;
-        } else if (item.params.typology === 'Slab') {
-            const slabShape = buildSlabShape(insetRing, 12);
-            footprintArea = calculateShapeArea(slabShape);
-            gfa = footprintArea * floors;
-        } else if (item.params.typology === 'LShape') {
-            const lShape = buildLShape(insetRing, 12);
-            footprintArea = calculateShapeArea(lShape);
-            gfa = footprintArea * floors;
-        } else if (item.params.typology === 'UShape') {
-            const uShape = buildUShape(insetRing, 12);
-            footprintArea = calculateShapeArea(uShape);
-            gfa = footprintArea * floors;
-        } else if (item.params.typology === 'PodiumTower') {
-            const podiumArea = calculatePolygonArea(insetRing);
-            const towerRing = offsetPolygonRing(insetRing, 3.5) || insetRing;
-            const towerArea = calculatePolygonArea(towerRing);
-            const podiumH = Math.min(height, 2 * item.params.floorHeight);
-            const towerH = Math.max(0, height - podiumH);
-            const podiumFloors = Math.round(podiumH / item.params.floorHeight);
-            const towerFloors = Math.round(towerH / item.params.floorHeight);
-            footprintArea = podiumArea;
-            gfa = (podiumArea * podiumFloors) + (towerArea * towerFloors);
-        } else if (item.params.typology === 'SteppedTower') {
-            const stepInterval = item.params.stepbackInterval || 4;
-            const stepDepth = item.params.stepbackDepth || 1.5;
-            let remainingFloors = floors;
-            let segmentIndex = 0;
-            footprintArea = calculatePolygonArea(insetRing);
-            gfa = 0;
-            while (remainingFloors > 0) {
-                const currentSetback = setback + segmentIndex * stepDepth;
-                const segmentRing = offsetPolygonRing(item.outerRing, currentSetback);
-                if (!segmentRing || segmentRing.length < 3) break;
-                const segFloors = Math.min(stepInterval, remainingFloors);
-                const segArea = calculatePolygonArea(segmentRing);
-                gfa += segArea * segFloors;
-                remainingFloors -= segFloors;
-                segmentIndex++;
-            }
-        } else if (item.params.typology === 'MultiBuildingBlock') {
-            const ob = getOrientedBounds(insetRing);
-            const W = ob.W;
-            const localRing = insetRing.map(pt => {
-                const rx = pt.x - ob.cx;
-                const ry = pt.y - ob.cy;
-                return {
-                    x: rx * ob.ux + ry * ob.uy,
-                    y: rx * ob.nx + ry * ob.ny
-                };
-            });
-            let footArea = 0;
-            let totalGfa = 0;
-            const floorsA = Math.round(floors * 1.3);
-            const floorsB = Math.round(floors * 0.7);
-            if (W >= 40) {
-                const localPoly1 = clipConvexPolygonVertical(localRing, ob.minX, ob.minX + W * 0.38);
-                const localPoly3 = clipConvexPolygonVertical(localRing, ob.minX + W * 0.62, ob.maxX);
-                let insetPoly1 = null;
-                let insetPoly3 = null;
-                if (localPoly1 && localPoly1.length >= 3) {
-                    const globalPoly1 = localPoly1.map(pt => ({
-                        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
-                        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
-                    }));
-                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
-                }
-                if (localPoly3 && localPoly3.length >= 3) {
-                    const globalPoly3 = localPoly3.map(pt => ({
-                        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
-                        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
-                    }));
-                    insetPoly3 = offsetPolygonRing(globalPoly3, 1.2);
-                }
-                if (insetPoly1 && insetPoly1.length >= 3) {
-                    const a1 = calculatePolygonArea(insetPoly1);
-                    footArea += a1;
-                    totalGfa += a1 * floorsA;
-                }
-                if (insetPoly3 && insetPoly3.length >= 3) {
-                    const a3 = calculatePolygonArea(insetPoly3);
-                    footArea += a3;
-                    totalGfa += a3 * floorsB;
-                }
-            } else {
-                const localPoly1 = clipConvexPolygonVertical(localRing, ob.minX, ob.minX + W * 0.5);
-                let insetPoly1 = null;
-                if (localPoly1 && localPoly1.length >= 3) {
-                    const globalPoly1 = localPoly1.map(pt => ({
-                        x: ob.cx + pt.x * ob.ux + pt.y * ob.nx,
-                        y: ob.cy + pt.x * ob.uy + pt.y * ob.ny
-                    }));
-                    insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
-                }
-                if (insetPoly1 && insetPoly1.length >= 3) {
-                    const a1 = calculatePolygonArea(insetPoly1);
-                    footArea += a1;
-                    totalGfa += a1 * floors;
-                }
-            }
-            footprintArea = footArea;
-            gfa = totalGfa;
-        } else { // Tower
-            footprintArea = calculatePolygonArea(insetRing);
-            gfa = footprintArea * floors;
-        }
-    }
+    const metrics = calculateParcelMetrics(item);
+    const maxBcr = Math.max(0.01, item.params.maxBcr || 0.45);
+    const maxFar = Math.max(0.01, item.params.maxFar || 2.5);
 
-    const bcr = item.area > 0 ? (footprintArea / item.area) : 0;
-    const far = item.area > 0 ? (gfa / item.area) : 0;
+    metFootprint.textContent = Math.round(metrics.footprintArea).toLocaleString() + " sq m";
+    metGfa.textContent = Math.round(metrics.gfa).toLocaleString() + " sq m";
+    metHeight.textContent = metrics.usage === 'Park' ? "0.0 m" : metrics.height.toFixed(1) + " m";
+    if (metZRange) metZRange.textContent = metrics.usage === 'Park' ? "0.0 - 0.0 m" : `0.0 - ${metrics.height.toFixed(1)} m`;
 
-    // Update UI elements
-    metFootprint.textContent = Math.round(footprintArea).toLocaleString() + " sq m";
-    metGfa.textContent = Math.round(gfa).toLocaleString() + " sq m";
-    metHeight.textContent = item.params.usage === 'Park' ? "0.0 m" : height.toFixed(1) + " m";
-    
-    // Actual vs Limit Text Labels
-    metBcrLabel.textContent = `${bcr.toFixed(2)} / ${item.params.maxBcr.toFixed(2)}`;
-    metFarLabel.textContent = `${far.toFixed(2)} / ${item.params.maxFar.toFixed(2)}`;
+    metBcrLabel.textContent = `${metrics.bcr.toFixed(2)} / ${maxBcr.toFixed(2)}`;
+    metFarLabel.textContent = `${metrics.far.toFixed(2)} / ${maxFar.toFixed(2)}`;
 
-    // Update Visual Gauge Bars widths
-    const bcrPercent = Math.min(100, (bcr / item.params.maxBcr) * 100);
-    const farPercent = Math.min(100, (far / item.params.maxFar) * 100);
-
+    const bcrPercent = Math.min(100, (metrics.bcr / maxBcr) * 100);
+    const farPercent = Math.min(100, (metrics.far / maxFar) * 100);
     bcrFillEl.style.width = `${bcrPercent}%`;
     farFillEl.style.width = `${farPercent}%`;
 
-    // Colors of progress bars based on violations
-    const bcrViolated = bcr > item.params.maxBcr;
-    bcrFillEl.className = `gauge-bar-fill ${bcrViolated ? "red-bar" : "green-bar"}`;
-    metBcrLabel.style.color = bcrViolated ? "#ef4444" : "#10b981";
+    bcrFillEl.className = `gauge-bar-fill ${metrics.bcr > maxBcr ? "red-bar" : "green-bar"}`;
+    farFillEl.className = `gauge-bar-fill ${metrics.far > maxFar ? "red-bar" : "green-bar"}`;
+    metBcrLabel.style.color = metrics.bcr > maxBcr ? "#ef4444" : "#10b981";
+    metFarLabel.style.color = metrics.far > maxFar ? "#ef4444" : "#10b981";
+    metHeight.style.color = metrics.height > item.params.maxHeight && metrics.usage !== 'Park' ? "#ef4444" : "#10b981";
 
-    const farViolated = far > item.params.maxFar;
-    farFillEl.className = `gauge-bar-fill ${farViolated ? "red-bar" : "green-bar"}`;
-    metFarLabel.style.color = farViolated ? "#ef4444" : "#10b981";
+    metStatus.textContent = metrics.status;
+    metStatus.className = "stat-val status-badge " + (metrics.violated ? "violation" : "compliant");
 
-    const heightViolated = height > item.params.maxHeight;
-    metHeight.style.color = heightViolated ? "#ef4444" : "#10b981";
-
-    const violated = heightViolated || bcrViolated || farViolated || footprintArea === 0;
-    
-    metStatus.textContent = violated ? "VIOLATION" : "COMPLIANT";
-    metStatus.className = "stat-val status-badge " + (violated ? "violation" : "compliant");
-
-    // Population estimator
-    const usage = item.params.usage;
-    let dwellingUnits = 0;
-    let population = 0;
-    const AVG_UNIT_SIZE = 100; // sq m per dwelling unit
-    const AVG_PERSONS = 2.8;   // persons per household
-
-    if (usage === 'Residential') {
-        dwellingUnits = Math.floor(gfa / AVG_UNIT_SIZE);
-        population = Math.round(dwellingUnits * AVG_PERSONS);
-    } else if (usage === 'MixedUse') {
-        // Ground floor commercial (assume 1 floor retail), rest residential
-        const residentialGfa = Math.max(0, gfa - footprintArea);
-        dwellingUnits = Math.floor(residentialGfa / AVG_UNIT_SIZE);
-        population = Math.round(dwellingUnits * AVG_PERSONS);
-    } else if (usage === 'Commercial' || usage === 'Civic') {
-        // Estimate workforce: 1 person per 15 sq m office/commercial
-        dwellingUnits = 0;
-        population = Math.round(gfa / 15);
+    if (metPlanScore) {
+        metPlanScore.textContent = `${metrics.planScore}/100`;
+        metPlanScore.className = `stat-val ${scoreClass(metrics.planScore)}`;
+    }
+    if (metConstraintLoad) {
+        metConstraintLoad.textContent = `${metrics.constraintLoad.toFixed(2)}x`;
+        metConstraintLoad.className = `stat-val ${metrics.constraintLoad > 1 ? "score-poor" : (metrics.constraintLoad > 0.88 ? "score-watch" : "score-good")}`;
     }
 
-    const densityPpHa = item.area > 0 ? Math.round(population / (item.area / 10000)) : 0;
+    if (metUnits) metUnits.textContent = metrics.usage === 'Park' ? '0' : metrics.dwellingUnits.toLocaleString();
+    if (metPopulation) metPopulation.textContent = metrics.usage === 'Park' ? '0' : metrics.population.toLocaleString();
+    if (metDensity) metDensity.textContent = metrics.usage === 'Park' ? '0 pp/ha' : `${metrics.densityPpHa.toLocaleString()} pp/ha`;
 
-    if (metUnits) metUnits.textContent = usage === 'Park' ? '0' : dwellingUnits.toLocaleString();
-    if (metPopulation) metPopulation.textContent = usage === 'Park' ? '0' : population.toLocaleString();
-    if (metDensity) metDensity.textContent = usage === 'Park' ? '0 pp/ha' : `${densityPpHa.toLocaleString()} pp/ha`;
+    if (metOsr) metOsr.textContent = metrics.gfa > 0 ? metrics.osr.toFixed(2) : 'N/A';
+    if (metOpenSpace) metOpenSpace.textContent = `${Math.round(metrics.openSpaceArea).toLocaleString()} sq m`;
+    if (metCarbon) metCarbon.textContent = metrics.carbon > 0 ? `${Math.round(metrics.carbon).toLocaleString()} t CO2e/yr` : '0 t CO2e/yr';
+    if (metRunoff) metRunoff.textContent = metrics.runoff.toFixed(2);
 
-    // Sustainability indicators
-    const osr = gfa > 0 ? ((item.area - footprintArea) / gfa) : 0;
-    
-    let carbonFactor = 0;
-    if (usage === 'Residential') carbonFactor = 0.045;
-    else if (usage === 'MixedUse') carbonFactor = 0.055;
-    else if (usage === 'Commercial') carbonFactor = 0.075;
-    else if (usage === 'Civic') carbonFactor = 0.050;
-    const carbon = gfa * carbonFactor;
-
-    const runoff = bcr * 0.90 + (1 - bcr) * 0.15;
-
-    if (metOsr) metOsr.textContent = gfa > 0 ? osr.toFixed(2) : 'N/A';
-    if (metCarbon) metCarbon.textContent = carbon > 0 ? `${Math.round(carbon).toLocaleString()} t CO2e/yr` : '0 t CO2e/yr';
-    if (metRunoff) metRunoff.textContent = runoff.toFixed(2);
+    updateParcelGroundColor(item, metrics.violated);
 }
 
 // Capture current 3D WebGL viewport canvas as a PNG screenshot download
@@ -4211,7 +4695,7 @@ function captureViewport() {
         link.click();
     } catch (e) {
         console.error(e);
-        alert("Failed to capture viewport screenshot.");
+        showToast("Failed to capture viewport screenshot.", "error");
     }
 }
 
@@ -4219,7 +4703,7 @@ function captureViewport() {
 function exportPlanningReport() {
     try {
         if (!parcelFeatures || parcelFeatures.length === 0) {
-            alert("No parcel data available to export.");
+            showToast("No parcel data available to export.", "warning");
             return;
         }
 
@@ -4230,6 +4714,8 @@ function exportPlanningReport() {
             "Typology",
             "Roof Style",
             "Setback Distance (m)",
+            "Mass X Scale",
+            "Mass Y Scale",
             "Floor Count",
             "Floor Height (m)",
             "Max BCR (Allowed)",
@@ -4241,9 +4727,12 @@ function exportPlanningReport() {
             "Actual BCR",
             "Actual FAR",
             "Compliance Status",
+            "PlanX Score",
+            "Constraint Load",
             "Est. Dwelling Units",
             "Est. Population",
             "Pop. Density (pp/ha)",
+            "Open Space Area (sq m)",
             "Open Space Ratio (OSR)",
             "Est. Carbon Footprint (t CO2e/yr)",
             "Stormwater Runoff Coefficient"
@@ -4267,6 +4756,7 @@ function exportPlanningReport() {
             const dwellingUnits = metrics.dwellingUnits;
             const population = metrics.population;
             const densityPpHa = metrics.densityPpHa;
+            const openSpaceArea = metrics.openSpaceArea;
             const osr = metrics.osr;
             const carbon = metrics.carbon;
             const runoff = metrics.runoff;
@@ -4278,6 +4768,8 @@ function exportPlanningReport() {
                 typology,
                 roofStyleForItem(item),
                 setback.toFixed(1),
+                (item.params.scaleX || 1).toFixed(2),
+                (item.params.scaleY || 1).toFixed(2),
                 floors,
                 floorHeight.toFixed(1),
                 item.params.maxBcr.toFixed(2),
@@ -4289,9 +4781,12 @@ function exportPlanningReport() {
                 bcr.toFixed(3),
                 far.toFixed(3),
                 status,
+                metrics.planScore,
+                metrics.constraintLoad.toFixed(3),
                 dwellingUnits,
                 population,
                 densityPpHa,
+                openSpaceArea.toFixed(1),
                 gfa > 0 ? osr.toFixed(3) : "N/A",
                 carbon.toFixed(1),
                 runoff.toFixed(3)
@@ -4318,9 +4813,10 @@ function exportPlanningReport() {
         document.body.appendChild(link);
         link.click();
         document.body.removeChild(link);
+        showToast("Planning report CSV exported.", "success");
     } catch (e) {
         console.error(e);
-        alert("Failed to export planning report CSV.");
+        showToast("Failed to export planning report CSV.", "error");
     }
 }
 
@@ -4335,7 +4831,7 @@ async function syncToQGIS() {
     }
     
     if (modifiedParcels.length === 0) {
-        alert("No modifications to synchronize. Select a parcel and adjust sliders first.");
+        showToast("No modifications to synchronize. Select a parcel and adjust sliders first.", "warning");
         return;
     }
 
@@ -4359,6 +4855,8 @@ async function syncToQGIS() {
             bcr: parseFloat(metrics.bcr.toFixed(2)),
             gfa: Math.round(metrics.gfa),
             setback: item.params.setback,
+            scale_x: item.params.scaleX || 1,
+            scale_y: item.params.scaleY || 1,
             floors: item.params.floors,
             floor_h: item.params.floorHeight,
             typology: item.params.typology,
@@ -4369,6 +4867,15 @@ async function syncToQGIS() {
             roof_style: roofStyleForItem(item),
             stepback_i: item.params.stepbackInterval || 4,
             stepback_d: item.params.stepbackDepth || 1.5,
+            plan_score: metrics.planScore,
+            const_load: parseFloat(metrics.constraintLoad.toFixed(3)),
+            height_m: parseFloat(metrics.height.toFixed(1)),
+            z_base: 0,
+            z_top: parseFloat(metrics.height.toFixed(1)),
+            pop_est: metrics.population,
+            carbon: parseFloat(metrics.carbon.toFixed(1)),
+            runoff: parseFloat(metrics.runoff.toFixed(3)),
+            open_space: parseFloat(metrics.openSpaceArea.toFixed(1)),
             coordinates: geoCoords
         };
     });
@@ -4387,13 +4894,13 @@ async function syncToQGIS() {
         const res = await response.json();
         if (res.status === 'ok') {
             modifiedParcels.forEach(item => { item.modified = false; });
-            alert(`Successfully synced ${modifiedParcels.length} parcel modifications back to QGIS!`);
+            showToast(`Synced ${modifiedParcels.length} parcel modifications back to QGIS.`, "success");
         } else {
-            alert("Synchronization failed:\n" + res.message);
+            showToast("Synchronization failed: " + res.message, "error");
         }
     } catch (e) {
         console.error(e);
-        alert("Connection error: Could not reach QGIS plugin server.");
+        showToast("Connection error: could not reach the QGIS plugin server.", "error");
     } finally {
         btnSync.disabled = false;
         btnSync.textContent = "Sync Parameters to QGIS";
@@ -4594,18 +5101,7 @@ function handleKeyboardShortcuts(event) {
 
         case 'f': // Focus on selected parcel
             if (selectedParcel && selectedParcel.buildingMesh) {
-                const box = new THREE.Box3().setFromObject(selectedParcel.buildingMesh);
-                const center = box.getCenter(new THREE.Vector3());
-                const size = box.getSize(new THREE.Vector3());
-                const maxDim = Math.max(size.x, size.y, size.z);
-
-                controls.target.copy(center);
-                camera.position.set(
-                    center.x + maxDim * 1.2,
-                    center.y + maxDim * 0.8,
-                    center.z + maxDim * 1.2
-                );
-                controls.update();
+                focusParcelCamera(selectedParcel, { toast: true });
             }
             break;
 
@@ -4636,7 +5132,7 @@ function handleKeyboardShortcuts(event) {
 // Apply to all parcels
 function applyToAllParcels() {
     if (!selectedParcel) {
-        alert('Please select a parcel first to use as the template.');
+        showToast('Select a parcel first to use as the template.', 'warning');
         return;
     }
 
@@ -4649,6 +5145,7 @@ function applyToAllParcels() {
         `Roof Style: ${templateParams.roofStyle || defaultRoofStyleFor(templateParams.usage, templateParams.typology)}\n` +
         `Floors: ${templateParams.floors}\n` +
         `Floor Height: ${templateParams.floorHeight}m\n` +
+        `Mass Scale: X ${(templateParams.scaleX || 1).toFixed(2)} / Y ${(templateParams.scaleY || 1).toFixed(2)}\n` +
         `Setback: ${templateParams.setback}m\n\n` +
         `This action cannot be undone.`
     );
@@ -4663,6 +5160,8 @@ function applyToAllParcels() {
         item.params.setback = templateParams.setback;
         item.params.floors = templateParams.floors;
         item.params.floorHeight = templateParams.floorHeight;
+        item.params.scaleX = templateParams.scaleX;
+        item.params.scaleY = templateParams.scaleY;
         item.params.typology = templateParams.typology;
         item.params.usage = templateParams.usage;
         item.params.roofStyle = templateParams.roofStyle;
@@ -4677,9 +5176,11 @@ function applyToAllParcels() {
 
     // Refresh dashboard for selected
     updateDashboard(selectedParcel);
+    updateCitySummary();
 
     btnApplyAll.disabled = false;
     btnApplyAll.textContent = 'Apply to All Parcels';
+    showToast(`Applied the selected scenario to ${parcelFeatures.length} parcels.`, 'success');
 }
 
 // WebGL memory and resource cleanup
@@ -4721,6 +5222,8 @@ function clearScene() {
             scene.remove(item.zoningMesh);
             disposeObject3D(item.zoningMesh);
         }
+
+        removeHeightLabel(item);
     });
     parcelFeatures = [];
 
@@ -4838,6 +5341,8 @@ function updateLayersVisibility() {
     intersectionMeshes.forEach(mesh => {
         mesh.visible = showTraffic;
     });
+
+    updateHeightLabels();
 }
 
 // Reload data from QGIS
@@ -4871,11 +5376,13 @@ async function reloadData() {
         
         // Keep checkboxes synchronized after reload
         updateLayersVisibility();
+        showToast("Layer data reloaded from QGIS.", "success");
         
     } catch (e) {
         console.error(e);
         const textEl = document.getElementById('loading-text');
         if (textEl) textEl.innerText = "ERROR: Failed to reload. Verify QGIS server connection.";
+        showToast("Reload failed. Verify the QGIS server connection.", "error");
     } finally {
         if (btnReload) {
             btnReload.disabled = false;
@@ -4935,6 +5442,44 @@ function onPointerMove(event) {
         return;
     }
 
+    // 1. Resize selected mass in local X/Y from viewport handles
+    if (isDraggingScaleAxis && selectedParcel && dragScaleCenter && dragScaleAxis) {
+        const intersectPoint = new THREE.Vector3();
+        raycaster.ray.intersectPlane(dragIntersectionPlane, intersectPoint);
+        const planPt = { x: intersectPoint.x, y: -intersectPoint.z };
+        const distance = Math.abs(
+            (planPt.x - dragScaleCenter.x) * dragScaleAxis.x +
+            (planPt.y - dragScaleCenter.y) * dragScaleAxis.y
+        );
+        const nextScale = clampNumber(
+            Math.round((dragStartScale * distance / Math.max(0.1, dragStartScaleDistance)) * 20) / 20,
+            0.35,
+            1.60,
+            dragStartScale
+        );
+        const key = isDraggingScaleAxis === 'x' ? 'scaleX' : 'scaleY';
+
+        if (Math.abs((selectedParcel.params[key] || 1) - nextScale) > 0.001) {
+            selectedParcel.params[key] = nextScale;
+            selectedParcel.modified = true;
+            if (isDraggingScaleAxis === 'x') {
+                if (inScaleX) inScaleX.value = nextScale;
+                if (lblScaleX) lblScaleX.textContent = nextScale.toFixed(2);
+            } else {
+                if (inScaleY) inScaleY.value = nextScale;
+                if (lblScaleY) lblScaleY.textContent = nextScale.toFixed(2);
+            }
+            rebuildParcel3D(selectedParcel);
+            updateDashboard(selectedParcel);
+            updateCitySummary();
+            updateHeightHandle();
+            updateSetbackHandle();
+            updateScaleHandles();
+        }
+        document.body.style.cursor = isDraggingScaleAxis === 'x' ? 'ew-resize' : 'ns-resize';
+        return;
+    }
+
     // 1. If actively dragging the setback handle
     if (isDraggingSetback && selectedParcel && setbackHandleMesh) {
         const intersectPoint = new THREE.Vector3();
@@ -4954,6 +5499,7 @@ function onPointerMove(event) {
             updateDashboard(selectedParcel);
             updateHeightHandle();
             updateSetbackHandle();
+            updateScaleHandles();
         }
         document.body.style.cursor = 'ew-resize';
         return;
@@ -4978,12 +5524,28 @@ function onPointerMove(event) {
             rebuildParcel3D(selectedParcel);
             updateDashboard(selectedParcel);
             updateHeightHandle();
+            updateScaleHandles();
         }
         document.body.style.cursor = 'ns-resize';
         return;
     }
 
-    // 3. If hovering over the setback handle
+    // 3. If hovering over X/Y mass scale handles
+    const scaleHandles = [scaleXHandleMesh, scaleYHandleMesh].filter(Boolean);
+    if (scaleHandles.length > 0) {
+        const handleIntersects = raycaster.intersectObjects(scaleHandles, true);
+        if (handleIntersects.length > 0) {
+            const axis = handleIntersects[0].object.parent?.userData?.axis || handleIntersects[0].object.userData?.axis;
+            document.body.style.cursor = axis === 'x' ? 'ew-resize' : 'ns-resize';
+            if (hoveredParcel && hoveredParcel !== selectedParcel) {
+                setBuildingHoverHighlight(hoveredParcel.buildingMesh, false);
+                hoveredParcel = null;
+            }
+            return;
+        }
+    }
+
+    // 4. If hovering over the setback handle
     if (setbackHandleMesh) {
         const handleIntersects = raycaster.intersectObject(setbackHandleMesh, true);
         if (handleIntersects.length > 0) {
@@ -4996,7 +5558,7 @@ function onPointerMove(event) {
         }
     }
 
-    // 4. If hovering over the height handle
+    // 5. If hovering over the height handle
     if (heightHandleMesh) {
         const handleIntersects = raycaster.intersectObject(heightHandleMesh, true);
         if (handleIntersects.length > 0) {
@@ -5182,6 +5744,34 @@ function onPointerDown(event) {
 
     raycaster.setFromCamera(mouse, camera);
 
+    const scaleHandles = [scaleXHandleMesh, scaleYHandleMesh].filter(Boolean);
+    if (scaleHandles.length > 0 && selectedParcel) {
+        const scaleIntersects = raycaster.intersectObjects(scaleHandles, true);
+        if (scaleIntersects.length > 0) {
+            const axis = scaleIntersects[0].object.parent?.userData?.axis || scaleIntersects[0].object.userData?.axis;
+            if (axis) {
+                isDraggingScaleAxis = axis;
+                controls.enabled = false;
+                dragIntersectionPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.1);
+                const ring = getScaledBuildableRing(selectedParcel) || selectedParcel.outerRing;
+                const ob = getOrientedBounds(ring);
+                dragScaleCenter = { x: ob.cx, y: ob.cy };
+                dragScaleAxis = axis === 'x'
+                    ? { x: ob.ux, y: ob.uy }
+                    : { x: ob.nx, y: ob.ny };
+                dragStartScale = axis === 'x' ? selectedParcel.params.scaleX || 1 : selectedParcel.params.scaleY || 1;
+                const hitPoint = new THREE.Vector3();
+                raycaster.ray.intersectPlane(dragIntersectionPlane, hitPoint);
+                const planPt = { x: hitPoint.x, y: -hitPoint.z };
+                dragStartScaleDistance = Math.max(
+                    0.1,
+                    Math.abs((planPt.x - dragScaleCenter.x) * dragScaleAxis.x + (planPt.y - dragScaleCenter.y) * dragScaleAxis.y)
+                );
+                return;
+            }
+        }
+    }
+
     if (setbackHandleMesh) {
         const handleIntersects = raycaster.intersectObject(setbackHandleMesh, true);
         if (handleIntersects.length > 0) {
@@ -5226,6 +5816,12 @@ function onPointerUp(event) {
     if (isDraggingSetback) {
         isDraggingSetback = false;
         controls.enabled = true; // Re-enable camera rotation
+    }
+    if (isDraggingScaleAxis) {
+        isDraggingScaleAxis = null;
+        dragScaleCenter = null;
+        dragScaleAxis = null;
+        controls.enabled = true;
     }
 }
 
@@ -5301,6 +5897,154 @@ function removeSetbackHandle() {
             }
         });
         setbackHandleMesh = null;
+    }
+}
+
+function buildScaleHandle(axis, colorHex) {
+    const group = new THREE.Group();
+    const mat = new THREE.MeshStandardMaterial({
+        color: colorHex,
+        emissive: colorHex,
+        emissiveIntensity: 0.35,
+        roughness: 0.24,
+        metalness: 0.55
+    });
+
+    const shaft = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 4.4, 12), mat);
+    shaft.rotation.z = Math.PI / 2;
+    shaft.position.y = 0.9;
+    shaft.castShadow = true;
+    group.add(shaft);
+
+    [-1, 1].forEach(dir => {
+        const cone = new THREE.Mesh(new THREE.ConeGeometry(0.42, 0.95, 16), mat);
+        cone.rotation.z = dir > 0 ? -Math.PI / 2 : Math.PI / 2;
+        cone.position.set(dir * 2.65, 0.9, 0);
+        cone.castShadow = true;
+        group.add(cone);
+    });
+
+    const box = new THREE.Mesh(new THREE.BoxGeometry(1.0, 1.0, 1.0), mat);
+    box.position.y = 0.9;
+    box.castShadow = true;
+    group.add(box);
+
+    const labelSprite = buildScaleHandleLabel(axis.toUpperCase(), colorHex);
+    labelSprite.position.set(0, 1.95, 0);
+    group.add(labelSprite);
+
+    group.userData = { isScaleHandle: true, axis };
+    return group;
+}
+
+function buildScaleHandleLabel(text, colorHex) {
+    const canvas = document.createElement('canvas');
+    canvas.width = 128;
+    canvas.height = 72;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.96)';
+    ctx.strokeStyle = `#${colorHex.toString(16).padStart(6, '0')}`;
+    ctx.lineWidth = 8;
+    ctx.beginPath();
+    drawRoundedRect(ctx, 8, 8, 112, 56, 18);
+    ctx.fill();
+    ctx.stroke();
+    ctx.fillStyle = `#${colorHex.toString(16).padStart(6, '0')}`;
+    ctx.font = '800 34px Inter, Arial, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(text, 64, 39);
+
+    const texture = new THREE.CanvasTexture(canvas);
+    texture.minFilter = THREE.LinearFilter;
+    texture.magFilter = THREE.LinearFilter;
+    const material = new THREE.SpriteMaterial({ map: texture, depthTest: false, depthWrite: false });
+    const sprite = new THREE.Sprite(material);
+    sprite.scale.set(3.2, 1.8, 1);
+    return sprite;
+}
+
+function drawRoundedRect(ctx, x, y, width, height, radius) {
+    const r = Math.min(radius, width / 2, height / 2);
+    ctx.moveTo(x + r, y);
+    ctx.lineTo(x + width - r, y);
+    ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+    ctx.lineTo(x + width, y + height - r);
+    ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+    ctx.lineTo(x + r, y + height);
+    ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+    ctx.lineTo(x, y + r);
+    ctx.quadraticCurveTo(x, y, x + r, y);
+    ctx.closePath();
+}
+
+function getScaledBuildableRing(item) {
+    if (!item) return null;
+    const buildable = resolveBuildableRing(item, item.params.setback || 0);
+    return scaleRingInLocalAxes(buildable.ring, item.params.scaleX || 1, item.params.scaleY || 1);
+}
+
+function spawnScaleHandles(item) {
+    removeScaleHandles();
+    if (!item || item.params.usage === 'Park') return;
+
+    const ring = getScaledBuildableRing(item);
+    if (!ring || ring.length < 3) return;
+    const ob = getOrientedBounds(ring);
+    const massHeight = Math.max(1, (item.params.floors || 1) * (item.params.floorHeight || 3));
+    const lift = massHeight + 1.2;
+
+    scaleXHandleMesh = buildScaleHandle('x', 0xef4444);
+    scaleXHandleMesh.position.set(
+        ob.cx + ob.ux * (ob.W / 2 + 3.2),
+        lift,
+        -(ob.cy + ob.uy * (ob.W / 2 + 3.2))
+    );
+    scaleXHandleMesh.rotation.y = Math.atan2(ob.uy, ob.ux);
+    scene.add(scaleXHandleMesh);
+
+    scaleYHandleMesh = buildScaleHandle('y', 0x2563eb);
+    scaleYHandleMesh.position.set(
+        ob.cx + ob.nx * (ob.H / 2 + 3.2),
+        lift,
+        -(ob.cy + ob.ny * (ob.H / 2 + 3.2))
+    );
+    scaleYHandleMesh.rotation.y = Math.atan2(ob.ny, ob.nx);
+    scene.add(scaleYHandleMesh);
+
+    if (window.planxDebug) {
+        window.planxDebug.scaleHandles = 2;
+        window.planxDebug.scaleHandleAxes = ['x', 'y'];
+    }
+}
+
+function updateScaleHandles() {
+    if (!selectedParcel || selectedParcel.params.usage === 'Park') {
+        removeScaleHandles();
+        return;
+    }
+    spawnScaleHandles(selectedParcel);
+}
+
+function removeScaleHandles() {
+    [scaleXHandleMesh, scaleYHandleMesh].forEach(handle => {
+        if (!handle) return;
+        scene.remove(handle);
+        handle.traverse(child => {
+            if (child.geometry) {
+                child.geometry.dispose();
+            }
+            if (child.material) {
+                if (child.material.map) child.material.map.dispose();
+                child.material.dispose();
+            }
+        });
+    });
+    scaleXHandleMesh = null;
+    scaleYHandleMesh = null;
+    if (window.planxDebug) {
+        window.planxDebug.scaleHandles = 0;
+        window.planxDebug.scaleHandleAxes = [];
     }
 }
 
@@ -5494,6 +6238,47 @@ function updateMeasurementLabels() {
             m.labelEl.style.left = `${screenPos.x}px`;
             m.labelEl.style.top = `${screenPos.y}px`;
         }
+    });
+}
+
+function ensureHeightLabel(item, height) {
+    const container = document.getElementById('measurement-overlay-container');
+    if (!container || !item || item.params?.usage === 'Park' || height <= 0) {
+        removeHeightLabel(item);
+        return;
+    }
+
+    if (!item.heightLabelEl) {
+        item.heightLabelEl = document.createElement('div');
+        item.heightLabelEl.className = 'height-label';
+        container.appendChild(item.heightLabelEl);
+    }
+
+    const bounds = getRingBounds(item.outerRing);
+    item.heightLabelAnchor = new THREE.Vector3(bounds.cx, height + 2.5, -bounds.cy);
+    item.heightLabelEl.textContent = `Z ${height.toFixed(1)} m`;
+    item.heightLabelEl.classList.toggle('selected', selectedParcel === item);
+}
+
+function removeHeightLabel(item) {
+    if (!item || !item.heightLabelEl) return;
+    item.heightLabelEl.remove();
+    item.heightLabelEl = null;
+    item.heightLabelAnchor = null;
+}
+
+function updateHeightLabels() {
+    const showLabels = toggleHeightLabelsEl ? toggleHeightLabelsEl.checked : true;
+    parcelFeatures.forEach(item => {
+        if (!item.heightLabelEl) return;
+        const shouldShow = showLabels && item.heightLabelAnchor && toggleBuildingsEl && toggleBuildingsEl.checked;
+        item.heightLabelEl.style.display = shouldShow ? 'block' : 'none';
+        if (!shouldShow) return;
+
+        item.heightLabelEl.classList.toggle('selected', selectedParcel === item);
+        const screenPos = project3DToScreen(item.heightLabelAnchor);
+        item.heightLabelEl.style.left = `${screenPos.x}px`;
+        item.heightLabelEl.style.top = `${screenPos.y}px`;
     });
 }
 
@@ -5766,7 +6551,7 @@ function optimizeParcelZoning(item) {
 // Automatically solve and optimize zoning constraints for all parcels in the city
 function solveCityLayout() {
     if (!parcelFeatures || parcelFeatures.length === 0) {
-        alert("No parcels loaded to solve.");
+        showToast("No parcels loaded to solve.", "warning");
         return;
     }
 
@@ -5779,8 +6564,9 @@ function solveCityLayout() {
         selectParcel(selectedParcel);
         updateDashboard(selectedParcel);
     }
+    updateCitySummary();
 
-    alert(`Procedural solver successfully optimized layout constraints for all ${parcelFeatures.length} parcels in the city!`);
+    showToast(`Procedural solver optimized ${parcelFeatures.length} parcels.`, "success");
 }
 
 // Procedural landscaping and facade assets

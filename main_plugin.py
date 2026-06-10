@@ -8,7 +8,12 @@ import threading
 import webbrowser
 from qgis.PyQt.QtCore import QObject, QCoreApplication, QThread, pyqtSignal, pyqtSlot
 from qgis.PyQt.QtGui import QIcon
-from qgis.PyQt.QtWidgets import QAction, QMessageBox
+from qgis.PyQt.QtWidgets import QMessageBox
+
+try:  # Qt5: QAction lives in QtWidgets
+    from qgis.PyQt.QtWidgets import QAction
+except ImportError:  # Qt6 / QGIS 4: QAction moved to QtGui
+    from qgis.PyQt.QtGui import QAction
 from qgis.core import (
     QgsVectorLayer,
     QgsJsonExporter,
@@ -18,6 +23,27 @@ from qgis.core import (
 
 from .dialog import PluginDialog
 from .server import PlanXProceduralServer
+
+
+def _make_field(name: str, kind: str):
+    """Create a QgsField across QGIS 3/4 (QMetaType first, QVariant fallback)."""
+    from qgis.core import QgsField
+    try:
+        from qgis.PyQt.QtCore import QMetaType
+        meta = {
+            "double": QMetaType.Type.Double,
+            "integer": QMetaType.Type.Int,
+            "string": QMetaType.Type.QString,
+        }
+        return QgsField(name, meta[kind])
+    except Exception:
+        from qgis.PyQt.QtCore import QVariant
+        legacy = {
+            "double": QVariant.Double,
+            "integer": QVariant.Int,
+            "string": QVariant.String,
+        }
+        return QgsField(name, legacy[kind])
 
 
 class _SyncBridge(QObject):
@@ -117,7 +143,7 @@ class PlanXUrbanProcedural3D:
         if not os.path.exists(web_dir):
             os.makedirs(web_dir, exist_ok=True)
 
-        # 1. Start Server
+        # 1. Start Server (falls forward to the next free port if the requested one is busy)
         try:
             if self.server:
                 self.server.stop()
@@ -126,6 +152,12 @@ class PlanXUrbanProcedural3D:
         except Exception as e:
             self._error("Server Error", f"Could not start local server on port {port}:\n{e}")
             return
+        if self.server.port != port:
+            self.iface.messageBar().pushInfo(
+                "PlanX Urban Procedural 3D",
+                f"Port {port} was busy; the cockpit is served on port {self.server.port} instead."
+            )
+        port = self.server.port
 
         # 2. Export GeoJSON
         try:
@@ -199,6 +231,8 @@ class PlanXUrbanProcedural3D:
                 "bcr": "double",
                 "gfa": "double",
                 "setback": "double",
+                "scale_x": "double",
+                "scale_y": "double",
                 "floors": "integer",
                 "usage": "string",
                 "floor_h": "double",
@@ -208,23 +242,26 @@ class PlanXUrbanProcedural3D:
                 "max_height": "double",
                 "roof_style": "string",
                 "stepback_i": "integer",
-                "stepback_d": "double"
+                "stepback_d": "double",
+                "plan_score": "double",
+                "const_load": "double",
+                "height_m": "double",
+                "z_base": "double",
+                "z_top": "double",
+                "pop_est": "integer",
+                "carbon": "double",
+                "runoff": "double",
+                "open_space": "double"
             }
 
             # Check if fields exist, create them if not (before starting edit session)
             existing_fields = [f.name() for f in self.active_layer.fields()]
 
-            from qgis.PyQt.QtCore import QVariant
-            fields_to_create = []
-            for name, ftype in fields_to_add.items():
-                if name not in existing_fields:
-                    from qgis.core import QgsField
-                    if ftype == "double":
-                        fields_to_create.append(QgsField(name, QVariant.Double))
-                    elif ftype == "integer":
-                        fields_to_create.append(QgsField(name, QVariant.Int))
-                    else:
-                        fields_to_create.append(QgsField(name, QVariant.String))
+            fields_to_create = [
+                _make_field(name, ftype)
+                for name, ftype in fields_to_add.items()
+                if name not in existing_fields
+            ]
 
             if fields_to_create and was_editing:
                 for field in fields_to_create:
@@ -260,6 +297,8 @@ class PlanXUrbanProcedural3D:
                 bcr_val = float(item.get("bcr", 0))
                 gfa_val = float(item.get("gfa", 0))
                 setback_val = float(item.get("setback", 0))
+                scale_x_val = float(item.get("scale_x", 1))
+                scale_y_val = float(item.get("scale_y", 1))
                 floors_val = int(item.get("floors", 1))
                 usage_val = str(item.get("usage", "Residential"))
                 floor_h_val = float(item.get("floor_h", 3.0))
@@ -270,6 +309,15 @@ class PlanXUrbanProcedural3D:
                 roof_style_val = str(item.get("roof_style", "Flat"))
                 stepback_i_val = int(item.get("stepback_i", 4))
                 stepback_d_val = float(item.get("stepback_d", 1.5))
+                plan_score_val = float(item.get("plan_score", 0))
+                const_load_val = float(item.get("const_load", 0))
+                height_m_val = float(item.get("height_m", 0))
+                z_base_val = float(item.get("z_base", 0))
+                z_top_val = float(item.get("z_top", height_m_val))
+                pop_est_val = int(item.get("pop_est", 0))
+                carbon_val = float(item.get("carbon", 0))
+                runoff_val = float(item.get("runoff", 0))
+                open_space_val = float(item.get("open_space", 0))
                 coords = item.get("coordinates", [])
 
                 # Update attributes
@@ -278,6 +326,8 @@ class PlanXUrbanProcedural3D:
                     "bcr": bcr_val,
                     "gfa": gfa_val,
                     "setback": setback_val,
+                    "scale_x": scale_x_val,
+                    "scale_y": scale_y_val,
                     "floors": floors_val,
                     "usage": usage_val,
                     "floor_h": floor_h_val,
@@ -288,6 +338,15 @@ class PlanXUrbanProcedural3D:
                     "roof_style": roof_style_val,
                     "stepback_i": stepback_i_val,
                     "stepback_d": stepback_d_val,
+                    "plan_score": plan_score_val,
+                    "const_load": const_load_val,
+                    "height_m": height_m_val,
+                    "z_base": z_base_val,
+                    "z_top": z_top_val,
+                    "pop_est": pop_est_val,
+                    "carbon": carbon_val,
+                    "runoff": runoff_val,
+                    "open_space": open_space_val,
                 }
                 for name, value in values.items():
                     if not self.active_layer.changeAttributeValue(fid, field_indices[name], value):
