@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.5.1] - 2026-06-18
+
+- docs: add CITATION.cff for Zenodo DOI integration
+
 ## [0.5.0] - 2026-06-10
 
 - QGIS 4 support: Qt6-safe QAction import, QMetaType-based sync fields with QVariant fallback, scoped-enum-safe polygon-only layer picker, qgisMaximumVersion 4.99; automatic fallback to the next free port when the chosen local port is busy; more image MIME types served; package slimmed by 1.1 MB by removing unused bundled viewer libraries (geotiff, unused three.js addons).
