@@ -168,6 +168,11 @@ class PluginDialog(QDialog):
         self.input_layer.setFilters(poly_filter)
         form.addRow("Polygon layer:", self.input_layer)
 
+        self.stats_lbl = QLabel("")
+        self.stats_lbl.setStyleSheet("color: #0f766e; font-weight: bold; font-size: 11px;")
+        form.addRow("", self.stats_lbl)
+        self.input_layer.layerChanged.connect(self._update_layer_stats)
+
         info_lbl = QLabel(
             "<p style='color: #475569; font-size: 11px; line-height: 1.5;'>"
             "Choose a vector polygon layer representing parcels, blocks, or study sites. "
@@ -231,3 +236,21 @@ class PluginDialog(QDialog):
         color = "#dc2626" if error else "#0f766e"
         self.status.setStyleSheet(f"color: {color}; padding: 4px; font-weight: bold; font-family: monospace;")
         self.status.setText(text)
+
+    def _update_layer_stats(self) -> None:
+        layer = self.input_layer.currentLayer()
+        if not layer:
+            if hasattr(self, 'stats_lbl'):
+                self.stats_lbl.setText("No layer selected.")
+            return
+        total = layer.featureCount()
+        selected = layer.selectedFeatureCount()
+        if hasattr(self, 'stats_lbl'):
+            if selected > 0:
+                self.stats_lbl.setText(f"Layer contains {total} features ({selected} selected).")
+            else:
+                self.stats_lbl.setText(f"Layer contains {total} features (no selection).")
+
+    def showEvent(self, event) -> None:
+        super().showEvent(event)
+        self._update_layer_stats()

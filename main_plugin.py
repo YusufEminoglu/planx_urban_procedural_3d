@@ -167,7 +167,10 @@ class PlanXUrbanProcedural3D:
             exporter.setIncludeAttributes(True)
             exporter.setDestinationCrs(self.export_crs)  # Export in export CRS (meters if layer is geographic)
 
-            features = list(layer.getFeatures())
+            if layer.selectedFeatureCount() > 0:
+                features = list(layer.selectedFeatures())
+            else:
+                features = list(layer.getFeatures())
             geojson_str = exporter.exportFeatures(features)
 
             # Inject CRS information so Web UI knows if it is geographic

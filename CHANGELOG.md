@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.5.2] - 2026-07-14
+
+- Export selected features only if selection exists, show stats, and clean security warnings without config overrides
+
 ## [0.5.1] - 2026-06-18
 
 - docs: add CITATION.cff for Zenodo DOI integration

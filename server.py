@@ -18,15 +18,13 @@ class ReusableThreadingHTTPServer(ThreadingHTTPServer):
 
 class SyncHTTPRequestHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
-        try:
+        from contextlib import suppress
+        with suppress(Exception):
             log_dir = os.path.join(tempfile.gettempdir(), "planx_urban_procedural_3d")
             os.makedirs(log_dir, exist_ok=True)
             log_file = os.path.join(log_dir, "server_debug.log")
             with open(log_file, "a", encoding="utf-8") as f:
                 f.write(f"[{self.log_date_time_string()}] {self.address_string()} - {format % args}\n")
-        except Exception:
-            pass
-
     def end_headers(self):
         # Enable CORS for local testing/development
         self.send_header('Access-Control-Allow-Origin', '*')
