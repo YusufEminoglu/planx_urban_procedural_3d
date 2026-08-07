@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.5.6] - 2026-08-07
+
+- Added online user manual link (https://yusufeminoglu.github.io/planx_urban_procedural_3d/) and GitHub repository star call-to-action.
+
 ## [0.5.5] - 2026-08-07
 
 - Expand reference manual 3x with theory, math, 10 DOI refs
