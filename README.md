@@ -16,6 +16,11 @@
 
 ---
 
+## 📖 Documentation
+
+**[Comprehensive Academic Reference Manual](https://yusufeminoglu.github.io/planx_urban_procedural_3d/)** — complete documentation of every feature, parameter, and workflow. Hosted on GitHub Pages.
+
+
 ## Why Urban Procedural 3D?
 
 Testing a zoning scenario usually means modelling in one tool, checking compliance in another, and copying numbers between them. This plugin closes the loop: select parcel/block polygons in QGIS, open a local Three.js cockpit, drag setbacks, heights and typologies — and watch FAR, BCR, GFA and a city-wide PlanX Score update in real time, then sync everything back to the source layer.
