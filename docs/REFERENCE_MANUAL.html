@@ -34,6 +34,9 @@ th{background:var(--code-bg);font-weight:600}
 .formula{background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:10px 16px;margin:8px 0;font-family:Cambria,'Times New Roman',serif;font-size:15px;text-align:center}
 @media(max-width:760px){body{flex-direction:column}#sidebar{width:100%;min-width:auto;height:auto;position:static;border-right:none;border-bottom:1px solid var(--border)}#main{padding:24px}}
 .hidden{display:none}
+
+.video-embed { position: relative; width: 100%; padding-top: 56.25%; margin: 4px 0 28px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border, #ccc); background: #000; }
+.video-embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
 </style>
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 </head>
@@ -67,6 +70,10 @@ th{background:var(--code-bg);font-weight:600}
 <main id="main">
 <h1>PlanX Urban Procedural 3D</h1>
 <p>Parametric 3D zoning and urban design laboratory &bull; v0.5.4</p>
+<div class="video-embed">
+  <iframe src="https://www.youtube-nocookie.com/embed/YWRBa4flbuU" title="PlanX Urban Procedural 3D &mdash; video walkthrough" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
+</div>
+
 
 <h2 id="overview">1. Overview</h2>
 <p>PlanX Urban Procedural 3D is a parametric 3D zoning and urban design tool bridging QGIS vector layers with a browser-based Three.js cockpit. Users select a polygon parcel layer, launch a local 3D scene, and interactively adjust building typologies, setbacks, floor counts, roof styles, land uses, and zoning constraints through draggable sliders and 3D handles. A real-time compliance dashboard reports Building Coverage Ratio (BCR), Floor Area Ratio (FAR), building height, PlanX Score, constraint load, population estimates, carbon footprint, and stormwater runoff. Design parameters synchronise back to the QGIS attribute table in a single click via a thread-safe bridge.</p>
