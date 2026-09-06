@@ -7,7 +7,7 @@
 **Parametric 3D zoning lab for QGIS — sculpt setbacks, heights and typologies in a Three.js editor with live compliance feedback.**
 
 [![QGIS](https://img.shields.io/badge/QGIS-3.28%2B-93b023?logo=qgis&logoColor=white)](https://plugins.qgis.org/plugins/planx_urban_procedural_3d/)
-[![Documentation](https://img.shields.io/badge/📖_Reference_Manual-13a0a0)](https://geophilo.pages.dev/planx_urban_procedural_3d/)
+[![Documentation](https://img.shields.io/badge/📖_Reference_Manual-13a0a0)](https://geophilo.com/planx_urban_procedural_3d/)
 [![Version](https://img.shields.io/github/v/tag/YusufEminoglu/planx_urban_procedural_3d?label=version&color=blue)](https://gitlab.com/geospacephilo/EasyFillet/releases)
 [![License](https://img.shields.io/badge/license-GPL--3.0-orange)](LICENSE)
 [![QGIS Plugin Hub](https://img.shields.io/badge/QGIS%20Hub-install-589632?logo=qgis&logoColor=white)](https://plugins.qgis.org/plugins/planx_urban_procedural_3d/)
@@ -18,7 +18,7 @@
 
 ## 📖 Documentation
 
-**[Comprehensive Academic Reference Manual](https://geophilo.pages.dev/planx_urban_procedural_3d/)** — complete documentation of every feature, parameter, and workflow. Hosted on Web Documentation.
+**[Comprehensive Academic Reference Manual](https://geophilo.com/planx_urban_procedural_3d/)** — complete documentation of every feature, parameter, and workflow. Hosted on Web Documentation.
 
 
 ## Why Urban Procedural 3D?
