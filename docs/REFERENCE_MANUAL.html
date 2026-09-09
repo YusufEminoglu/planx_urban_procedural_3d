@@ -4,80 +4,67 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PlanX Urban Procedural 3D &mdash; Reference Manual</title>
-<style>
-:root {--bg:#fafaf8;--sidebar-bg:#f3f3f0;--text:#1a1a1a;--muted:#5a5a55;--accent:#2a6e5e;--border:#d8d5ce;--card-bg:#fff;--link:#1a6e5e;--code-bg:#edf4f2;--search-bg:#fff}
-*{box-sizing:border-box;margin:0;padding:0}
-body{font-family:"Segoe UI",system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--text);line-height:1.6;display:flex;min-height:100vh}
-#sidebar{width:270px;min-width:270px;background:var(--sidebar-bg);border-right:1px solid var(--border);padding:24px 20px;position:sticky;top:0;height:100vh;overflow-y:auto}
-#sidebar h2{font-size:13px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin-bottom:10px}
-#search{width:100%;padding:8px 12px;border:1px solid var(--border);border-radius:6px;font-size:13px;background:var(--search-bg);margin-bottom:20px}
-#sidebar nav a{display:block;padding:5px 0;font-size:13px;color:var(--link);text-decoration:none}
-#sidebar nav a:hover{text-decoration:underline}
-#sidebar nav a.sub{padding-left:14px;font-size:12px}
-#main{flex:1;padding:40px 48px;max-width:860px}
-h1{font-size:28px;font-weight:700;color:var(--accent);margin-bottom:4px}
-h1+p{color:var(--muted);margin-bottom:32px}
-h2{font-size:20px;font-weight:600;color:var(--accent);margin:36px 0 12px;padding-bottom:6px;border-bottom:2px solid var(--border)}
-h3{font-size:16px;font-weight:600;color:var(--text);margin:20px 0 8px}
-p,li{font-size:14px;color:var(--text)}
-p{margin-bottom:10px}
-.card{background:var(--card-bg);border:1px solid var(--border);border-radius:8px;padding:16px;margin-bottom:14px}
-.card h4{font-size:14px;font-weight:600;color:var(--accent);margin-bottom:6px}
-ul{margin:4px 0 10px 20px}
-li{margin-bottom:3px}
-code{font-family:Consolas,'Courier New',monospace;background:var(--code-bg);padding:1px 6px;border-radius:3px;font-size:13px}
-table{width:100%;border-collapse:collapse;margin:12px 0;font-size:13px}
-th,td{border:1px solid var(--border);padding:8px 12px;text-align:left}
-th{background:var(--code-bg);font-weight:600}
-.refs{font-size:12px;color:var(--muted)}
-.refs a{color:var(--link)}
-.formula{background:var(--card-bg);border:1px solid var(--border);border-radius:6px;padding:10px 16px;margin:8px 0;font-family:Cambria,'Times New Roman',serif;font-size:15px;text-align:center}
-@media(max-width:760px){body{flex-direction:column}#sidebar{width:100%;min-width:auto;height:auto;position:static;border-right:none;border-bottom:1px solid var(--border)}#main{padding:24px}}
-.hidden{display:none}
-
-.video-embed { position: relative; width: 100%; padding-top: 56.25%; margin: 4px 0 28px; border-radius: 8px; overflow: hidden; border: 1px solid var(--border, #ccc); background: #000; }
-.video-embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
-</style>
+<link rel="stylesheet" href="assets/manual-chrome.css">
 <script id="MathJax-script" async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+<style>
+:root {
+  --chrome-bg: #fafaf8;
+  --chrome-panel-bg: #f3f3f0;
+  --chrome-text: #1a1a1a;
+  --chrome-muted: #5a5a55;
+  --chrome-accent: #16a34a;
+  --chrome-accent-hover: #0f7d38;
+  --chrome-border: #d8d5ce;
+  --chrome-code-bg: #edf4f2;
+}
+.video-embed { position: relative; width: 100%; padding-top: 56.25%; margin: 4px 0 28px; border-radius: 8px; overflow: hidden; border: 1px solid var(--chrome-border); background: #000; }
+.video-embed iframe { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; }
+.refs { font-size: 12px; color: var(--chrome-muted); }
+.refs a { color: var(--chrome-accent); }
+</style>
 </head>
 <body>
-<aside id="sidebar">
-  <input type="text" id="search" placeholder="Search manual&hellip;" autocomplete="off">
+<div class="chrome-layout">
+<aside id="chrome-sidebar">
+  <input type="text" id="chrome-search" placeholder="Search manual&hellip;" autocomplete="off">
   <h2>Contents</h2>
-  <nav id="toc">
-    <a href="#overview">1. Overview</a>
-    <a href="#theory" class="sub">2. Theoretical Foundations</a>
-    <a href="#arch" class="sub">3. Architecture</a>
-    <a href="#typologies" class="sub">4. Building Typologies</a>
-    <a href="#roofs" class="sub">5. Roof Styles</a>
-    <a href="#landuse" class="sub">6. Land Use &amp; Facades</a>
-    <a href="#compliance" class="sub">7. Zoning Compliance</a>
-    <a href="#metrics" class="sub">8. Urban Metrics</a>
-    <a href="#score" class="sub">9. PlanX Score</a>
-    <a href="#handles" class="sub">10. 3D Editing Handles</a>
-    <a href="#roads" class="sub">11. Procedural Roads</a>
-    <a href="#heatmaps" class="sub">12. Heatmap Modes</a>
-    <a href="#daynight" class="sub">13. Day/Night Cycle</a>
-    <a href="#presets" class="sub">14. Scenario Presets</a>
-    <a href="#auto" class="sub">15. Auto-Solve City</a>
-    <a href="#params" class="sub">16. Parameters</a>
-    <a href="#sync" class="sub">17. QGIS Sync</a>
-    <a href="#workflow" class="sub">18. Workflow</a>
-    <a href="#technical" class="sub">19. Technical Notes</a>
-    <a href="#literature" class="sub">20. Literature</a>
-  </nav>
+  <ul id="chrome-toc">
+    <li><a href="#overview">1. Overview</a></li>
+    <li><a href="#theory">2. Theoretical Foundations</a></li>
+    <li><a href="#arch">3. Architecture</a></li>
+    <li><a href="#typologies">4. Building Typologies</a></li>
+    <li><a href="#roofs">5. Roof Styles</a></li>
+    <li><a href="#landuse">6. Land Use &amp; Facades</a></li>
+    <li><a href="#compliance">7. Zoning Compliance</a></li>
+    <li><a href="#metrics">8. Urban Metrics</a></li>
+    <li><a href="#score">9. PlanX Score</a></li>
+    <li><a href="#handles">10. 3D Editing Handles</a></li>
+    <li><a href="#roads">11. Procedural Roads</a></li>
+    <li><a href="#heatmaps">12. Heatmap Modes</a></li>
+    <li><a href="#daynight">13. Day/Night Cycle</a></li>
+    <li><a href="#presets">14. Scenario Presets</a></li>
+    <li><a href="#auto">15. Auto-Solve City</a></li>
+    <li><a href="#params">16. Parameters</a></li>
+    <li><a href="#sync">17. QGIS Sync</a></li>
+    <li><a href="#workflow">18. Workflow</a></li>
+    <li><a href="#technical">19. Technical Notes</a></li>
+    <li><a href="#literature">20. Literature</a></li>
+    <li class="chrome-no-results">No matches</li>
+  </ul>
 </aside>
-<main id="main">
+<main class="chrome-content">
 <h1>PlanX Urban Procedural 3D</h1>
-<p>Parametric 3D zoning and urban design laboratory &bull; v0.5.4</p>
+<p>Parametric 3D zoning and urban design laboratory &bull; v0.5.7</p>
 <div class="video-embed">
   <iframe src="https://www.youtube-nocookie.com/embed/YWRBa4flbuU" title="PlanX Urban Procedural 3D &mdash; video walkthrough" loading="lazy" allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture; web-share" allowfullscreen></iframe>
 </div>
 
-
+<section id="overview">
 <h2 id="overview">1. Overview</h2>
 <p>PlanX Urban Procedural 3D is a parametric 3D zoning and urban design tool bridging QGIS vector layers with a browser-based Three.js cockpit. Users select a polygon parcel layer, launch a local 3D scene, and interactively adjust building typologies, setbacks, floor counts, roof styles, land uses, and zoning constraints through draggable sliders and 3D handles. A real-time compliance dashboard reports Building Coverage Ratio (BCR), Floor Area Ratio (FAR), building height, PlanX Score, constraint load, population estimates, carbon footprint, and stormwater runoff. Design parameters synchronise back to the QGIS attribute table in a single click via a thread-safe bridge.</p>
+</section>
 
+<section id="theory">
 <h2 id="theory">2. Theoretical Foundations</h2>
 
 <h3>2.1 Spacematrix and Density Theory</h3>
@@ -88,11 +75,15 @@ th{background:var(--code-bg);font-weight:600}
 
 <h3>2.3 Sustainability Metrics</h3>
 <p>Carbon footprint estimation follows a building-type intensity method: each land use category has an assigned carbon factor in tCO<sub>2</sub>e per m<sup>2</sup> of GFA per year, multiplied by total GFA. Stormwater runoff uses a weighted impervious/pervious surface coefficient model where impervious surfaces (buildings, roads) contribute a runoff coefficient of 0.90 and pervious surfaces (green space) contribute 0.15. While simplified, this model is consistent with the U.S. Environmental Protection Agency's (1983) runoff curve methodology and provides comparative rather than absolute estimates.</p>
+</section>
 
+<section id="arch">
 <h2 id="arch">3. Architecture</h2>
 <p>The plugin has four components: (1) a QGIS PyQt dialog for layer selection and server configuration, (2) a Python <code>ThreadingHTTPServer</code> serving GeoJSON and handling sync POST requests at the <code>/sync</code> endpoint, (3) a ~6,900-line Three.js browser application with procedural city generation, and (4) a <code>_SyncBridge</code> QObject that safely marshals sync calls from the HTTP server thread to the QGIS main thread via <code>pyqtSignal</code> with a 30-second timeout.</p>
 <p>Coordinate handling: geographic CRS layers are auto-projected to EPSG:3857 (Web Mercator) with a warning banner. The browser scene translates all coordinates to a local origin (bounding box midpoint) for numerical stability. Sync writes geometry back through reverse projection to the original layer CRS.</p>
+</section>
 
+<section id="typologies">
 <h2 id="typologies">4. Building Typologies</h2>
 <p>Eight typologies, each with a distinct footprint generation algorithm. The default typology is selected automatically by parcel area and aspect ratio:</p>
 <table>
@@ -109,7 +100,9 @@ th{background:var(--code-bg);font-weight:600}
 
 <h3>4.1 GFA Computation by Typology</h3>
 <p>GFA = footprint_area &times; floors for Tower, Slab, Courtyard, L-Shape, and U-Shape. Podium Tower: GFA = (podium_area &times; 2) + (tower_area &times; tower_floors) where tower_floors = max(0, floors &minus; 2). Stepped Tower: GFA = &sum; segment_area<sub>i</sub> &times; seg_floors<sub>i</sub>. Multi-Building: GFA = buildingA_area &times; floorA + buildingB_area &times; floorB + (optional buildingC_area &times; floorC).</p>
+</section>
 
+<section id="roofs">
 <h2 id="roofs">5. Roof Styles (4 types)</h2>
 <table>
   <tr><th>Style</th><th>Algorithm</th><th>Material</th></tr>
@@ -118,7 +111,9 @@ th{background:var(--code-bg);font-weight:600}
   <tr><td>Mansard</td><td>Inner ring offset 1.5 m raised 2.0 m. Steep outer sloped facets + flat top cap extrusion.</td><td>French slate (#334155 / #1e293b)</td></tr>
   <tr><td>Flat</td><td>Penthouse (6x3x6 m), 2 HVAC units, helipad (commercial/mixed) or 3 tilted solar panels (civic).</td><td>Grey + equipment</td></tr>
 </table>
+</section>
 
+<section id="landuse">
 <h2 id="landuse">6. Land Use and Procedural Facades</h2>
 <table>
   <tr><th>Usage</th><th>Facade Colour</th><th>CO<sub>2</sub> Factor (t/m<sup>2</sup> GFA/yr)</th></tr>
@@ -129,7 +124,9 @@ th{background:var(--code-bg);font-weight:600}
   <tr><td>Public Park</td><td>Green turf (no mass)</td><td>0</td></tr>
 </table>
 <p>Facade textures are canvas-drawn at runtime (256x512 pixels, 4 columns of windows per floor). Ground floors: shopfronts for Commercial/Mixed-Use (light blue glazing), entrance doors for Residential/Civic. Upper floors: coloured window rectangles with ~48% randomly lit. Lit windows use warm gold, amber, cool blue, or soft teal. A separate emissive map enables night glow when the day/night cycle enters night mode.</p>
+</section>
 
+<section id="compliance">
 <h2 id="compliance">7. Zoning Compliance</h2>
 <p>Each parcel is evaluated against three user-defined zoning limits:</p>
 <table>
@@ -143,7 +140,9 @@ th{background:var(--code-bg);font-weight:600}
 \(\mathrm{constraintLoad} = \max\left(\dfrac{\mathrm{BCR}}{\mathrm{maxBCR}},\; \dfrac{\mathrm{FAR}}{\mathrm{maxFAR}},\; \dfrac{h}{\mathrm{maxHeight}}\right)\)
 </div>
 <p>A value of 1.0 or less indicates compliance; values above 1.0 indicate violation with the maximum term identifying the binding constraint.</p>
+</section>
 
+<section id="metrics">
 <h2 id="metrics">8. Urban Metrics</h2>
 <table>
   <tr><th>Metric</th><th>Formula</th><th>Units</th></tr>
@@ -155,7 +154,9 @@ th{background:var(--code-bg);font-weight:600}
   <tr><td>Carbon Footprint</td><td>\(\mathrm{GFA} \times c_{\mathrm{usage}}\)</td><td>t CO<sub>2</sub>e / yr</td></tr>
   <tr><td>Stormwater Runoff</td><td>\(\mathrm{BCR} \times 0.90 + (1 - \mathrm{BCR}) \times 0.15\)</td><td>Runoff coefficient</td></tr>
 </table>
+</section>
 
+<section id="score">
 <h2 id="score">9. PlanX Score</h2>
 <p>A 0&ndash;100 composite planning quality indicator:</p>
 <div class="formula">
@@ -166,9 +167,11 @@ th{background:var(--code-bg);font-weight:600}
 \(P = \max(0, \frac{\mathrm{BCR}-\mathrm{maxBCR}}{\mathrm{maxBCR}}) \times 28 + \max(0, \frac{\mathrm{FAR}-\mathrm{maxFAR}}{\mathrm{maxFAR}}) \times 34 + \max(0, \frac{h-\mathrm{maxH}}{\mathrm{maxH}}) \times 26 + P_{\mathrm{zero}}\)
 </div>
 <p>Where \(P_{\mathrm{zero}} = 28\) if footprint area is zero (park with no massing is not penalised separately). Scores are classified: &ge;76 green (good), 55&ndash;75 amber (moderate), &lt;55 red (poor).</p>
+</section>
 
+<section id="handles">
 <h2 id="handles">10. 3D In-Scene Editing Handles</h2>
-<div class="card">
+<div class="chrome-card">
   <h4>Four Draggable Handles</h4>
   <ul>
     <li><strong>Z Height Handle</strong> (teal cylinder + cone tip): Drag vertically along camera-aligned plane. Delta Y divided by floor height rounds to floors. Updates slider and rebuilds model live.</li>
@@ -178,9 +181,11 @@ th{background:var(--code-bg);font-weight:600}
   </ul>
   <p>All handles disable <code>OrbitControls</code> during drag and re-enable on <code>pointerup</code>. Positions computed via ray-plane intersection for precise interaction.</p>
 </div>
+</section>
 
+<section id="roads">
 <h2 id="roads">11. Procedural Roads and Traffic</h2>
-<div class="card">
+<div class="chrome-card">
   <h4>Inferred Road Network</h4>
   <p>Road corridors are inferred from parallel-facing boundary segments between different parcels. The algorithm (<code>inferRoadCorridors()</code>) performs pairwise comparison of all boundary segments (minimum 6 m, decomposed from parcel rings). Parallel segments (dot product &gt; 0.94) with overlapping projections (minimum 8 m) and consistent width (deviation &lt; 3.0 m) form corridors of 6&ndash;70 m. Each corridor is trimmed 18% from both ends and deduplicated by midpoint proximity.</p>
   <p><strong>Classification by corridor width:</strong></p>
@@ -194,9 +199,11 @@ th{background:var(--code-bg);font-weight:600}
   </table>
   <p>Intersections are classified as roundabout (3+ arms or 2 arms with sharp angle and width &ge;12 m) or signalised. Roundabouts receive circular asphalt patches, raised central islands with curb rings, direction markings, and approach crosswalks (5 stripes each). Signalised intersections receive traffic signal hardware with red/amber/green lamp meshes. Animated vehicles follow road centerline curves with headlights/taillights at night.</p>
 </div>
+</section>
 
+<section id="heatmaps">
 <h2 id="heatmaps">12. Heatmap Modes</h2>
-<div class="card">
+<div class="chrome-card">
   <h4>Four Visualisation Modes</h4>
   <ul>
     <li><strong>Score:</strong> Red (&lt;55) &rarr; amber (55&ndash;75) &rarr; green (&ge;76). Linear interpolation within each segment.</li>
@@ -206,15 +213,19 @@ th{background:var(--code-bg);font-weight:600}
   </ul>
   <p>A legend bar updates with descriptive text for each mode. Parks always render as forest green (#064e3b) in compliance mode.</p>
 </div>
+</section>
 
+<section id="daynight">
 <h2 id="daynight">13. Day/Night Cycle</h2>
-<div class="card">
+<div class="chrome-card">
   <h4>Solar Animation and Procedural Sky</h4>
   <p>Solar slider (6:00&ndash;22:00) with Play/Pause animation. Procedural sky dome shader: gradient from horizon (#f6fbff) to zenith (#9ed8ff) by day; dark blue gradient with star field (pseudo-random hash) at night. Directional light moves along a 3D arc (radius 500, z = 100). Night threshold: &lt;7:30 or &gt;19:30 hours.</p>
   <p><strong>Night mode:</strong> background #020617, ambient indigo (#1e1b4b) at intensity 0.25, directional 0.05, building window emissive maps activated (intensity 1.0), streetlight bulbs visible, car headlights/taillights on, star intensity 0.9.</p>
   <p><strong>Day peak:</strong> ambient intensity 1.18, directional intensity = 0.92 + sin(sun_angle) &times; 0.7. ACES filmic tone mapping at exposure 1.32. Post-processing: <code>EffectComposer</code> with <code>UnrealBloomPass</code> (strength 0.3, radius 0.4, threshold 0.85).</p>
 </div>
+</section>
 
+<section id="presets">
 <h2 id="presets">14. Scenario Presets</h2>
 <table>
   <tr><th>Preset</th><th>Typology</th><th>Usage</th><th>Floors</th><th>Setback</th><th>Max BCR</th><th>Max FAR</th><th>Max H (m)</th></tr>
@@ -224,9 +235,11 @@ th{background:var(--code-bg);font-weight:600}
   <tr><td>Low-Carbon Campus</td><td>Courtyard / Slab</td><td>Civic</td><td>3&ndash;4</td><td>6.0</td><td>0.35</td><td>1.6</td><td>18</td></tr>
   <tr><td>Public Realm Upgrade</td><td>Tower (park mode)</td><td>Park</td><td>1</td><td>2.0</td><td>0.10</td><td>0.10</td><td>4</td></tr>
 </table>
+</section>
 
+<section id="auto">
 <h2 id="auto">15. Auto-Solve City</h2>
-<div class="card">
+<div class="chrome-card">
   <h4>Optimisation Algorithm</h4>
   <p><code>optimizeParcelZoning()</code> operates per-parcel with a three-phase strategy:</p>
   <ol>
@@ -236,7 +249,9 @@ th{background:var(--code-bg);font-weight:600}
   </ol>
   <p><code>solveCityLayout()</code> applies this to all parcels, rebuilds each, and refreshes the dashboard and city summary.</p>
 </div>
+</section>
 
+<section id="params">
 <h2 id="params">16. Parameters and Controls</h2>
 <table>
   <tr><th>Parameter</th><th>Range</th><th>Default</th><th>Step</th></tr>
@@ -255,13 +270,17 @@ th{background:var(--code-bg);font-weight:600}
   <tr><td>Port</td><td>1024 &ndash; 65535 (auto-falls forward up to +20 ports if busy)</td><td>8090</td></tr>
   <tr><td>Auto-open browser</td><td>Checkbox</td><td>On</td></tr>
 </table>
+</section>
 
+<section id="sync">
 <h2 id="sync">17. Two-Way QGIS Synchronisation</h2>
-<div class="card">
+<div class="chrome-card">
   <h4>Thread-Safe Attribute and Geometry Sync</h4>
   <p>The <code>/sync</code> POST endpoint receives a JSON payload with per-feature updates. A <code>_SyncBridge</code> QObject marshals from the HTTP server thread to the QGIS main thread via <code>pyqtSignal</code>, with a 30-second timeout. The plugin auto-creates 27 PlanX-specific attribute fields (<code>far</code>, <code>bcr</code>, <code>gfa</code>, <code>setback</code>, <code>scale_x</code>, <code>scale_y</code>, <code>floors</code>, <code>usage</code>, <code>floor_h</code>, <code>typology</code>, <code>max_bcr</code>, <code>max_far</code>, <code>max_height</code>, <code>roof_style</code>, <code>stepback_i</code>, <code>stepback_d</code>, <code>plan_score</code>, <code>const_load</code>, <code>height_m</code>, <code>z_base</code>, <code>z_top</code>, <code>pop_est</code>, <code>carbon</code>, <code>runoff</code>, <code>open_space</code>) using cross-QGIS-version field creation (QMetaType for QGIS 4, QVariant for QGIS 3). Geometry updates from setback ring coordinates are reprojected to the layer's original CRS. All writes are transactional via <code>beginEditCommand()</code>/<code>endEditCommand()</code> with full rollback on failure.</p>
 </div>
+</section>
 
+<section id="workflow">
 <h2 id="workflow">18. Workflow Guide</h2>
 <ol>
   <li>Load a polygon parcel/block layer into QGIS. A projected CRS in metres is recommended; geographic CRS layers are auto-projected to EPSG:3857 with a warning.</li>
@@ -275,7 +294,9 @@ th{background:var(--code-bg);font-weight:600}
   <li>Click <em>Sync Parameters to QGIS</em> to write all modified parcel attributes and optional geometry back to the QGIS layer.</li>
   <li>Export a CSV with 28 columns (BOM-prefixed) for all parcels for external analysis.</li>
 </ol>
+</section>
 
+<section id="technical">
 <h2 id="technical">19. Technical Notes</h2>
 <ul>
   <li><strong>Polygon operations (pure JavaScript):</strong> Offset polygon ring (corner-bisector method with degeneracy check), oriented bounding box (longest-edge projection), shoelace area formula, convex polygon clipping, line intersection, ring normalisation&mdash;no external geometry libraries.</li>
@@ -288,7 +309,9 @@ th{background:var(--code-bg);font-weight:600}
   <li><strong>CSV export:</strong> BOM-prefixed CSV with 28 columns. Cinematic tour with auto-orbit camera. 3D ruler with screen-space labels.</li>
   <li><strong>QGIS compatibility:</strong> 3.28 through 4.99. Cross-version field creation via QMetaType/QVariant fallback. Scoped enum handling for Qt5/Qt6.</li>
 </ul>
+</section>
 
+<section id="literature">
 <h2 id="literature">20. Literature</h2>
 <ol class="refs">
   <li>Batty, M. (2013). <em>The New Science of Cities</em>. MIT Press. <a href="https://doi.org/10.7551/mitpress/9399.001.0001">DOI: 10.7551/mitpress/9399.001.0001</a></li>
@@ -302,34 +325,11 @@ th{background:var(--code-bg);font-weight:600}
   <li>Kolbe, T. H. (2009). Representing and exchanging 3D city models with CityGML. In J. Lee &amp; S. Zlatanova (Eds.), <em>3D Geo-Information Sciences</em> (pp. 15&ndash;31). Springer. <a href="https://doi.org/10.1007/978-3-540-87395-2_2">DOI: 10.1007/978-3-540-87395-2_2</a></li>
   <li>Alexander, C., Ishikawa, S., &amp; Silverstein, M. (1977). <em>A Pattern Language: Towns, Buildings, Construction</em>. Oxford University Press.</li>
 </ol>
+</section>
 </main>
-<script>
-(function(){
-  var inp=document.getElementById('search');
-  var main=document.getElementById('main');
-  if(!inp||!main)return;
-  var all=main.querySelectorAll('h2,h3,p,li,td');
-  inp.addEventListener('input',function(){
-    var q=inp.value.trim().toLowerCase();
-    all.forEach(function(el){el.classList.remove('hidden');});
-    if(!q)return;
-    var sections=main.querySelectorAll('h2');
-    sections.forEach(function(h){
-      var next=h.nextElementSibling;
-      var keep=h.textContent.toLowerCase().indexOf(q)!==-1;
-      while(next && next.tagName!=='H2'){
-        if(next.textContent.toLowerCase().indexOf(q)!==-1)keep=true;
-        next=next.nextElementSibling;
-      }
-      if(!keep){
-        next=h.nextElementSibling;
-        while(next && next.tagName!=='H2'){next.classList.add('hidden');next=next.nextElementSibling;}
-        h.classList.add('hidden');
-      }
-    });
-  });
-})();
-</script>
+</div>
+
+<script src="assets/manual-chrome.js"></script>
 
 <!-- PDF PRINT BUTTON -->
 <style>
@@ -344,7 +344,7 @@ th{background:var(--code-bg);font-weight:600}
 @media print { #print-pdf-btn { display: none !important; } }
 @media (max-width: 768px) { #print-pdf-btn { bottom: 12px; right: 12px; padding: 8px 14px; font-size: 12px; } }
 </style>
-<button id="print-pdf-btn" onclick="window.print()" title="Save as PDF / Print">&#x1F5A8;&#xFE0F; Save as PDF</button>
+<button id="print-pdf-btn" onclick="window.print()" title="Save as PDF / Print">🖨️ Save as PDF</button>
 
 </body>
 </html>
