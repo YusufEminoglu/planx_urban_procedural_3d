@@ -469,7 +469,7 @@ input[type="range"]::-webkit-slider-thumb:hover {
     bottom: 20px;
     z-index: 9;
     display: grid;
-    grid-template-columns: 118px repeat(4, 96px);
+    grid-template-columns: 118px repeat(4, 98px) 104px;
     gap: 1px;
     overflow: hidden;
     padding: 0;
@@ -477,13 +477,13 @@ input[type="range"]::-webkit-slider-thumb:hover {
 }
 
 .scorecell {
-    min-height: 64px;
-    padding: 11px 12px;
-    background: rgba(248, 250, 252, 0.86);
+    min-height: 70px;
+    padding: 9px 11px;
+    background: rgba(248, 250, 252, 0.88);
     display: flex;
     flex-direction: column;
     justify-content: center;
-    gap: 4px;
+    gap: 3px;
 }
 
 .scorecell-primary {
@@ -491,30 +491,129 @@ input[type="range"]::-webkit-slider-thumb:hover {
     color: #ffffff;
 }
 
+.scorecell-action {
+    padding: 8px;
+    align-items: stretch;
+}
+
+.pin-baseline-btn {
+    width: 100%;
+    height: 100%;
+    border: 1px dashed rgba(15, 118, 110, 0.45);
+    background: rgba(15, 118, 110, 0.08);
+    color: var(--accent);
+    border-radius: 6px;
+    font-family: var(--font-family);
+    font-size: 0.7rem;
+    font-weight: 800;
+    cursor: pointer;
+    padding: 6px;
+    transition: all 0.16s ease;
+}
+
+.pin-baseline-btn:hover {
+    background: var(--accent);
+    color: #ffffff;
+    border-style: solid;
+}
+
 .score-label {
     color: inherit;
     opacity: 0.72;
-    font-size: 0.64rem;
+    font-size: 0.62rem;
     font-weight: 900;
     letter-spacing: 0.08em;
     text-transform: uppercase;
 }
 
 .scorecell strong {
-    font-size: 1rem;
-    line-height: 1;
+    font-size: 0.98rem;
+    line-height: 1.05;
 }
 
 .scorecell-primary strong {
-    font-size: 1.55rem;
+    font-size: 1.45rem;
+}
+
+.score-delta {
+    font-size: 0.64rem;
+    font-weight: 700;
+    opacity: 0.85;
+    line-height: 1.1;
+}
+
+.score-delta.delta-pos {
+    color: #059669;
+}
+
+.scorecell-primary .score-delta.delta-pos {
+    color: #a7f3d0;
+}
+
+.score-delta.delta-neg {
+    color: #dc2626;
+}
+
+.scorecell-primary .score-delta.delta-neg {
+    color: #fecaca;
+}
+
+.quick-select-row {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    margin-top: 6px;
+}
+
+.quick-select-btn {
+    border: 1px solid rgba(15, 118, 110, 0.25);
+    background: rgba(15, 118, 110, 0.06);
+    color: var(--accent);
+    border-radius: 6px;
+    padding: 5px 6px;
+    font-family: var(--font-family);
+    font-size: 0.7rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.quick-select-btn:hover {
+    background: var(--accent);
+    color: #ffffff;
+}
+
+.export-obj-button {
+    width: 100%;
+    background: rgba(2, 132, 199, 0.08);
+    color: #0369a1;
+    border: 1px dashed #0284c7;
+    padding: 8px;
+    border-radius: 8px;
+    font-family: var(--font-family);
+    font-weight: 600;
+    font-size: 0.8rem;
+    cursor: pointer;
+    transition: all 0.2s;
+    margin-top: 5px;
+}
+
+.export-obj-button:hover {
+    background: rgba(2, 132, 199, 0.16);
+    border-style: solid;
+}
+
+.hud-btn.disabled {
+    opacity: 0.42;
+    pointer-events: none;
 }
 
 .heatmap-legend {
     position: absolute;
     left: 20px;
-    bottom: 96px;
+    bottom: 102px;
     z-index: 9;
-    width: 268px;
+    width: 288px;
     padding: 10px 12px;
 }
 

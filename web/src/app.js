@@ -11,6 +11,10 @@ let scene, camera, renderer, controls, composer;
 let raycaster, mouse;
 let parcelFeatures = []; // Array of { fid, properties, outerRing, parcelMesh, buildingMesh, setbackMesh, sidewalkMesh, zoningMesh, area, params }
 let selectedParcel = null;
+let selectedParcels = new Set(); // Multi-parcel selection set
+let undoStack = [];
+let redoStack = [];
+let baselineSummary = null;
 let skyDome = null;
 let skyUniforms = null;
 let pedestrians = []; // Array of { mesh, path, speed, progress, direction }
@@ -71,12 +75,20 @@ const controlsEl = document.getElementById('editor-controls');
 const btnSync = document.getElementById('btn-sync');
 const btnCapture = document.getElementById('btn-capture');
 const btnExportCsv = document.getElementById('btn-export-csv');
+const btnExportObj = document.getElementById('btn-export-obj');
 const btnSolveSelected = document.getElementById('btn-solve-selected');
 const btnSolveCity = document.getElementById('btn-solve-city');
 const btnReload = document.getElementById('btn-reload');
 const btnTour = document.getElementById('btn-tour');
 const btnMeasure = document.getElementById('btn-measure');
 const btnClearMeasure = document.getElementById('hud-btn-clear-measure');
+const btnUndo = document.getElementById('btn-undo');
+const btnRedo = document.getElementById('btn-redo');
+const btnPinBaseline = document.getElementById('btn-pin-baseline');
+const btnSelectSameUse = document.getElementById('btn-select-same-use');
+const btnSelectViolations = document.getElementById('btn-select-violations');
+const btnSelectAllBuildable = document.getElementById('btn-select-all-buildable');
+const propSelectionCountEl = document.getElementById('prop-selection-count');
 const crsWarningBannerEl = document.getElementById('crs-warning-banner');
 const btnGuide = document.getElementById('btn-guide');
 const btnGuideInline = document.getElementById('btn-guide-inline');
@@ -92,12 +104,18 @@ const cityComplianceRateEl = document.getElementById('city-compliance-rate');
 const cityGfaEl = document.getElementById('city-gfa');
 const cityPopulationEl = document.getElementById('city-population');
 const cityCarbonEl = document.getElementById('city-carbon');
+const deltaScoreEl = document.getElementById('delta-score');
+const deltaComplianceEl = document.getElementById('delta-compliance');
+const deltaGfaEl = document.getElementById('delta-gfa');
+const deltaPopulationEl = document.getElementById('delta-population');
+const deltaCarbonEl = document.getElementById('delta-carbon');
 const legendTitleEl = document.getElementById('legend-title');
 const legendNoteEl = document.getElementById('legend-note');
 const toastContainerEl = document.getElementById('toast-container');
 
 // View settings checkbox controls
 const toggleBuildingsEl = document.getElementById('toggle-buildings');
+const toggleBuildingHeatmapEl = document.getElementById('toggle-building-heatmap');
 const toggleZoningEl = document.getElementById('toggle-zoning');
 const toggleSetbacksEl = document.getElementById('toggle-setbacks');
 const toggleSidewalksEl = document.getElementById('toggle-sidewalks');
@@ -138,6 +156,7 @@ const lblMaxBcr = document.getElementById('val-max-bcr');
 const lblMaxFar = document.getElementById('val-max-far');
 const lblMaxHeight = document.getElementById('val-max-height');
 const lblTime = document.getElementById('val-time');
+const lblSolarAngles = document.getElementById('val-solar-angles');
 
 // Metrics
 const metFid = document.getElementById('prop-fid');
@@ -236,6 +255,44 @@ const SCENARIO_PRESETS = {
                 maxBcr: 0.50,
                 maxFar: item.area >= 1400 ? 3.2 : 2.6,
                 maxHeight: item.area >= 1400 ? 30 : 24
+            };
+        }
+    },
+    perimeter: {
+        label: 'Perimeter Courtyard Block',
+        note: 'European perimeter urban block with continuous street-wall enclosure, inner courtyard garden, and pitched roofs.',
+        apply(item) {
+            const typology = item.area >= 750 ? 'Courtyard' : 'UShape';
+            return {
+                usage: item.area >= 1400 ? 'MixedUse' : 'Residential',
+                typology,
+                roofStyle: 'Hipped',
+                setback: 2.5,
+                floors: item.area >= 1200 ? 6 : 5,
+                floorHeight: 3.1,
+                maxBcr: 0.55,
+                maxFar: 3.0,
+                maxHeight: 22
+            };
+        }
+    },
+    highrise: {
+        label: 'High-Rise CBD Core',
+        note: 'Commercial and mixed-use central business district towers with stepped sky-exposure envelopes and flat helipad roofs.',
+        apply(item) {
+            const isLarge = item.area >= 1300;
+            return {
+                usage: isLarge ? 'Commercial' : 'MixedUse',
+                typology: isLarge ? 'SteppedTower' : 'PodiumTower',
+                roofStyle: 'Flat',
+                setback: 4.0,
+                floors: isLarge ? 18 : 13,
+                floorHeight: 3.4,
+                maxBcr: 0.55,
+                maxFar: isLarge ? 6.5 : 4.8,
+                maxHeight: isLarge ? 72 : 52,
+                stepbackInterval: 5,
+                stepbackDepth: 2.0
             };
         }
     },
@@ -533,33 +590,147 @@ function onWindowResize() {
     composer.setSize(window.innerWidth, window.innerHeight);
 }
 
+function captureScenarioSnapshot() {
+    return parcelFeatures.map(item => ({
+        fid: item.fid,
+        modified: !!item.modified,
+        params: { ...item.params }
+    }));
+}
+
+function recordHistorySnapshot() {
+    if (!parcelFeatures || parcelFeatures.length === 0) return;
+    const snap = captureScenarioSnapshot();
+    const last = undoStack[undoStack.length - 1];
+    if (last && JSON.stringify(last) === JSON.stringify(snap)) return;
+    undoStack.push(snap);
+    if (undoStack.length > 30) undoStack.shift();
+    redoStack = [];
+    updateUndoRedoButtons();
+}
+
+function applySnapshotState(snapshot) {
+    if (!Array.isArray(snapshot)) return;
+    const byFid = new Map(snapshot.map(s => [s.fid, s]));
+    parcelFeatures.forEach(item => {
+        const saved = byFid.get(item.fid);
+        if (saved) {
+            item.params = sanitizeParcelParams({ ...saved.params }, item.area, item.outerRing);
+            item.modified = !!saved.modified;
+            rebuildParcel3D(item);
+        }
+    });
+    if (selectedParcel) {
+        selectParcel(selectedParcel, { keepMulti: true, skipCamera: true });
+        updateDashboard(selectedParcel);
+    }
+    updateCitySummary();
+}
+
+function undoScenario() {
+    if (undoStack.length === 0) {
+        showToast("Nothing to undo.", "warning");
+        return;
+    }
+    redoStack.push(captureScenarioSnapshot());
+    const prev = undoStack.pop();
+    applySnapshotState(prev);
+    updateUndoRedoButtons();
+    showToast("Undid last scenario change.", "success");
+}
+
+function redoScenario() {
+    if (redoStack.length === 0) {
+        showToast("Nothing to redo.", "warning");
+        return;
+    }
+    undoStack.push(captureScenarioSnapshot());
+    const next = redoStack.pop();
+    applySnapshotState(next);
+    updateUndoRedoButtons();
+    showToast("Redid scenario change.", "success");
+}
+
+function updateUndoRedoButtons() {
+    if (btnUndo) btnUndo.classList.toggle('disabled', undoStack.length === 0);
+    if (btnRedo) btnRedo.classList.toggle('disabled', redoStack.length === 0);
+}
+
+function getActiveTargetParcels() {
+    if (selectedParcels.size > 0) {
+        return Array.from(selectedParcels);
+    }
+    return selectedParcel ? [selectedParcel] : [];
+}
+
+function updateSelectionHud() {
+    const count = selectedParcels.size || (selectedParcel ? 1 : 0);
+    if (propSelectionCountEl) {
+        propSelectionCountEl.textContent = count > 1 ? `${count} parcels (batch mode)` : `${count} parcel`;
+    }
+    if (btnApplyAll) {
+        btnApplyAll.textContent = count > 1
+            ? `Apply to ${count} Selected Parcels`
+            : 'Propagate to All Buildable Parcels';
+    }
+}
+
 // Set up UI input controls event handlers
 function setupInputListeners() {
-    const triggerUpdate = () => {
+    let sliderSnapshotRecorded = false;
+    const recordOncePerDrag = () => {
+        if (!sliderSnapshotRecorded) {
+            recordHistorySnapshot();
+            sliderSnapshotRecorded = true;
+        }
+    };
+    const resetDragSnapshotFlag = () => {
+        sliderSnapshotRecorded = false;
+    };
+
+    [inSetback, inFloors, inFloorHeight, inScaleX, inScaleY, inStepbackInterval, inStepbackDepth, inMaxBcr, inMaxFar, inMaxHeight]
+        .filter(Boolean)
+        .forEach(el => {
+            el.addEventListener('pointerdown', recordOncePerDrag);
+            el.addEventListener('pointerup', resetDragSnapshotFlag);
+            el.addEventListener('change', resetDragSnapshotFlag);
+        });
+
+    [inTypology, inUsage, inRoofStyle].filter(Boolean).forEach(el => {
+        el.addEventListener('focus', () => { sliderSnapshotRecorded = false; });
+    });
+
+    const triggerUpdate = (event) => {
         if (!selectedParcel) return;
-        
-        selectedParcel.modified = true;
+        if (event && event.type === 'change' && !sliderSnapshotRecorded) {
+            recordHistorySnapshot();
+        }
 
-        // Read slider values
-        selectedParcel.params.setback = parseFloat(inSetback.value);
-        selectedParcel.params.floors = parseInt(inFloors.value);
-        selectedParcel.params.floorHeight = parseFloat(inFloorHeight.value);
-        selectedParcel.params.scaleX = parseFloat(inScaleX.value);
-        selectedParcel.params.scaleY = parseFloat(inScaleY.value);
-        selectedParcel.params.typology = inTypology.value;
-        selectedParcel.params.usage = inUsage.value;
-        selectedParcel.params.roofStyle = inRoofStyle.value;
-        
-        selectedParcel.params.stepbackInterval = parseInt(inStepbackInterval.value);
-        selectedParcel.params.stepbackDepth = parseFloat(inStepbackDepth.value);
+        const targets = getActiveTargetParcels();
+        const changedId = event && event.target ? event.target.id : null;
 
-        // Zoning limits
-        selectedParcel.params.maxBcr = parseFloat(inMaxBcr.value);
-        selectedParcel.params.maxFar = parseFloat(inMaxFar.value);
-        selectedParcel.params.maxHeight = parseFloat(inMaxHeight.value);
-        selectedParcel.params = sanitizeParcelParams(selectedParcel.params, selectedParcel.area, selectedParcel.outerRing);
+        targets.forEach(targetItem => {
+            targetItem.modified = true;
+            if (!changedId || changedId === 'input-setback') targetItem.params.setback = parseFloat(inSetback.value);
+            if (!changedId || changedId === 'input-floors') targetItem.params.floors = parseInt(inFloors.value);
+            if (!changedId || changedId === 'input-floorheight') targetItem.params.floorHeight = parseFloat(inFloorHeight.value);
+            if (!changedId || changedId === 'input-scale-x') targetItem.params.scaleX = parseFloat(inScaleX.value);
+            if (!changedId || changedId === 'input-scale-y') targetItem.params.scaleY = parseFloat(inScaleY.value);
+            if (!changedId || changedId === 'input-typology') targetItem.params.typology = inTypology.value;
+            if (!changedId || changedId === 'input-usage') targetItem.params.usage = inUsage.value;
+            if (!changedId || changedId === 'input-roof-style') targetItem.params.roofStyle = inRoofStyle.value;
+            if (!changedId || changedId === 'input-stepback-interval') targetItem.params.stepbackInterval = parseInt(inStepbackInterval.value);
+            if (!changedId || changedId === 'input-stepback-depth') targetItem.params.stepbackDepth = parseFloat(inStepbackDepth.value);
+            if (!changedId || changedId === 'input-max-bcr') targetItem.params.maxBcr = parseFloat(inMaxBcr.value);
+            if (!changedId || changedId === 'input-max-far') targetItem.params.maxFar = parseFloat(inMaxFar.value);
+            if (!changedId || changedId === 'input-max-height') targetItem.params.maxHeight = parseFloat(inMaxHeight.value);
 
-        // Update labels
+            targetItem.params = sanitizeParcelParams(targetItem.params, targetItem.area, targetItem.outerRing);
+            rebuildParcel3D(targetItem);
+            setBuildingHighlight(targetItem.buildingMesh, true);
+        });
+
+        // Update labels from primary selectedParcel
         lblSetback.textContent = selectedParcel.params.setback.toFixed(1);
         lblFloors.textContent = selectedParcel.params.floors;
         lblFloorHeight.textContent = selectedParcel.params.floorHeight.toFixed(1);
@@ -568,24 +739,20 @@ function setupInputListeners() {
         lblMaxBcr.textContent = selectedParcel.params.maxBcr.toFixed(2);
         lblMaxFar.textContent = selectedParcel.params.maxFar.toFixed(1);
         lblMaxHeight.textContent = selectedParcel.params.maxHeight.toFixed(1);
-        
+
         lblStepbackInterval.textContent = selectedParcel.params.stepbackInterval;
         lblStepbackDepth.textContent = selectedParcel.params.stepbackDepth.toFixed(1);
 
-        // Show/hide stepped tower controls
         if (selectedParcel.params.typology === 'SteppedTower') {
             steppedTowerControlsEl.classList.remove('hidden');
         } else {
             steppedTowerControlsEl.classList.add('hidden');
         }
 
-        // Rebuild meshes
-        rebuildParcel3D(selectedParcel);
         updateDashboard(selectedParcel);
         updateCitySummary();
         updateScaleHandles();
 
-        // Update height handle position or remove it if park
         if (selectedParcel.params.usage !== 'Park') {
             if (heightHandleMesh) {
                 updateHeightHandle();
@@ -605,7 +772,7 @@ function setupInputListeners() {
 
     const triggerTimeUpdate = () => {
         if (isTimeAnimating) {
-            toggleTimeAnimation(); // Stop playing if user manually drags slider
+            toggleTimeAnimation();
         }
         const tVal = parseFloat(inTime.value);
         const hours = Math.floor(tVal);
@@ -623,19 +790,16 @@ function setupInputListeners() {
     inTypology.addEventListener('change', triggerUpdate);
     inUsage.addEventListener('change', triggerUpdate);
     inRoofStyle.addEventListener('change', triggerUpdate);
-    
+
     inStepbackInterval.addEventListener('input', triggerUpdate);
     inStepbackDepth.addEventListener('input', triggerUpdate);
-    
-    // Zoning inputs
+
     inMaxBcr.addEventListener('input', triggerUpdate);
     inMaxFar.addEventListener('input', triggerUpdate);
     inMaxHeight.addEventListener('input', triggerUpdate);
 
-    // Time-of-day slider
     inTime.addEventListener('input', triggerTimeUpdate);
 
-    // Play Solar animation button
     if (btnPlayTime) {
         btnPlayTime.addEventListener('click', toggleTimeAnimation);
     }
@@ -645,15 +809,80 @@ function setupInputListeners() {
     if (btnExportCsv) {
         btnExportCsv.addEventListener('click', exportPlanningReport);
     }
+    if (btnExportObj) {
+        btnExportObj.addEventListener('click', exportCityObjModel);
+    }
+    if (btnUndo) {
+        btnUndo.addEventListener('click', undoScenario);
+    }
+    if (btnRedo) {
+        btnRedo.addEventListener('click', redoScenario);
+    }
+    if (btnPinBaseline) {
+        btnPinBaseline.addEventListener('click', () => {
+            pinCurrentAsBaseline(true);
+        });
+    }
+    if (btnSelectSameUse) {
+        btnSelectSameUse.addEventListener('click', () => {
+            if (!selectedParcel) return;
+            const targetUse = selectedParcel.params.usage;
+            parcelFeatures.forEach(item => {
+                const match = item.params.usage === targetUse;
+                if (match) selectedParcels.add(item);
+                else selectedParcels.delete(item);
+                setBuildingHighlight(item.buildingMesh, match);
+            });
+            updateSelectionHud();
+            showToast(`Selected ${selectedParcels.size} '${targetUse}' parcels.`, "success");
+        });
+    }
+    if (btnSelectViolations) {
+        btnSelectViolations.addEventListener('click', () => {
+            const violatedItems = parcelFeatures.filter(item => calculateParcelMetrics(item).violated);
+            if (violatedItems.length === 0) {
+                showToast("All parcels are currently compliant!", "success");
+                return;
+            }
+            parcelFeatures.forEach(item => setBuildingHighlight(item.buildingMesh, false));
+            selectedParcels = new Set(violatedItems);
+            violatedItems.forEach(item => setBuildingHighlight(item.buildingMesh, true));
+            selectParcel(violatedItems[0], { keepMulti: true });
+            updateSelectionHud();
+            showToast(`Selected ${violatedItems.length} non-compliant parcel(s).`, "warning");
+        });
+    }
+    if (btnSelectAllBuildable) {
+        btnSelectAllBuildable.addEventListener('click', () => {
+            const buildable = parcelFeatures.filter(item => item.params.usage !== 'Park');
+            if (buildable.length === 0) return;
+            parcelFeatures.forEach(item => setBuildingHighlight(item.buildingMesh, false));
+            selectedParcels = new Set(buildable);
+            buildable.forEach(item => setBuildingHighlight(item.buildingMesh, true));
+            if (!selectedParcel || selectedParcel.params.usage === 'Park') {
+                selectParcel(buildable[0], { keepMulti: true });
+            }
+            updateSelectionHud();
+            showToast(`Selected ${buildable.length} buildable parcels.`, "success");
+        });
+    }
+
     if (btnSolveSelected) {
         btnSolveSelected.addEventListener('click', () => {
-            if (selectedParcel) {
-                optimizeParcelZoning(selectedParcel);
-                rebuildParcel3D(selectedParcel);
-                selectParcel(selectedParcel);
-                updateDashboard(selectedParcel);
+            const targets = getActiveTargetParcels();
+            if (targets.length > 0) {
+                recordHistorySnapshot();
+                targets.forEach(item => {
+                    optimizeParcelZoning(item);
+                    rebuildParcel3D(item);
+                    setBuildingHighlight(item.buildingMesh, true);
+                });
+                if (selectedParcel) {
+                    selectParcel(selectedParcel, { keepMulti: true, skipCamera: true });
+                    updateDashboard(selectedParcel);
+                }
                 updateCitySummary();
-                showToast("Selected parcel optimized against its active zoning limits.", "success");
+                showToast(`Optimized ${targets.length} selected parcel(s) against active zoning limits.`, "success");
             } else {
                 showToast("Select a parcel first, then run Auto-Solve Selected Parcel.", "warning");
             }
@@ -663,7 +892,6 @@ function setupInputListeners() {
         btnSolveCity.addEventListener('click', solveCityLayout);
     }
 
-    // Cinematic Tour Toggle
     if (btnTour) {
         btnTour.addEventListener('click', () => {
             isCinematicTour = !isCinematicTour;
@@ -671,25 +899,19 @@ function setupInputListeners() {
         });
     }
 
-    // Toggle 3D Ruler / Measurement Mode
     if (btnMeasure) {
         btnMeasure.addEventListener('click', () => {
             isMeasurementMode = !isMeasurementMode;
             btnMeasure.classList.toggle('active', isMeasurementMode);
-            
+
             if (isMeasurementMode) {
-                // De-select active parcel to prevent interference
                 deselectParcel();
-                // Ensure cinematic tour is off
                 if (isCinematicTour) {
                     isCinematicTour = false;
                     if (btnTour) btnTour.classList.remove('active');
                 }
-                
-                // Initialize temp lines/labels if they don't exist yet
                 initTemporaryMeasurementAssets();
             } else {
-                // Disable measurement mode
                 document.body.style.cursor = 'default';
                 if (tempMeasureLine) tempMeasureLine.visible = false;
                 if (tempMeasureLabel) tempMeasureLabel.style.display = 'none';
@@ -698,7 +920,6 @@ function setupInputListeners() {
         });
     }
 
-    // Clear Measurements
     if (btnClearMeasure) {
         btnClearMeasure.addEventListener('click', clearAllMeasurements);
     }
@@ -724,11 +945,18 @@ function setupInputListeners() {
     }
     if (btnApplyPreset) {
         btnApplyPreset.addEventListener('click', () => {
-            if (!selectedParcel) {
+            const targets = getActiveTargetParcels();
+            if (targets.length === 0) {
                 showToast("Select a parcel before applying a scenario preset.", "warning");
                 return;
             }
-            applyScenarioPreset(selectedParcel, inScenarioPreset ? inScenarioPreset.value : 'balanced');
+            recordHistorySnapshot();
+            const key = inScenarioPreset ? inScenarioPreset.value : 'balanced';
+            targets.forEach(item => applyScenarioPreset(item, key, { silent: targets.length > 1 }));
+            if (targets.length > 1) {
+                const preset = SCENARIO_PRESETS[key] || SCENARIO_PRESETS.balanced;
+                showToast(`${preset.label} applied to ${targets.length} selected parcels.`, "success");
+            }
         });
     }
     if (inHeatmapMode) {
@@ -739,17 +967,16 @@ function setupInputListeners() {
         });
     }
 
-    // Reload Data button
     if (btnReload) {
         btnReload.addEventListener('click', reloadData);
     }
 
-    // View toggles listeners
     const onVisibilityChange = () => {
         updateLayersVisibility();
     };
 
     if (toggleBuildingsEl) toggleBuildingsEl.addEventListener('change', onVisibilityChange);
+    if (toggleBuildingHeatmapEl) toggleBuildingHeatmapEl.addEventListener('change', refreshParcelHeatmap);
     if (toggleZoningEl) toggleZoningEl.addEventListener('change', onVisibilityChange);
     if (toggleSetbacksEl) toggleSetbacksEl.addEventListener('change', onVisibilityChange);
     if (toggleSidewalksEl) toggleSidewalksEl.addEventListener('change', onVisibilityChange);
@@ -758,19 +985,19 @@ function setupInputListeners() {
     if (toggleGridEl) toggleGridEl.addEventListener('change', onVisibilityChange);
     if (toggleHeightLabelsEl) toggleHeightLabelsEl.addEventListener('change', updateHeightLabels);
 
-    // Apply All button
     if (btnApplyAll) {
         btnApplyAll.addEventListener('click', applyToAllParcels);
     }
 
-    // Keyboard shortcuts
     window.addEventListener('keydown', handleKeyboardShortcuts);
+    updateUndoRedoButtons();
 }
 
 function isUiEventTarget(target) {
     return !!(
         target.closest('#control-dock') ||
         target.closest('.hud-bar') ||
+        target.closest('.city-scorecard') ||
         target.closest('.loading-screen') ||
         target.closest('#guide-panel') ||
         target.closest('#guide-scrim')
@@ -1009,15 +1236,34 @@ function lerpColorHex(colorA, colorB, t) {
     return a.lerp(b, clamp01(t)).getHex();
 }
 
+const LANDUSE_COLOR_HEX = {
+    Residential: 0xd97706,
+    MixedUse: 0x0d9488,
+    Commercial: 0x2563eb,
+    Civic: 0x64748b,
+    Park: 0x16a34a
+};
+
 function colorForParcel(item) {
     const metrics = calculateParcelMetrics(item);
-    if (selectedParcel === item && heatmapMode === 'compliance') {
+    const isSel = selectedParcel === item || selectedParcels.has(item);
+    if (isSel && heatmapMode === 'compliance') {
         return metrics.violated ? 0xb91c1c : 0x0d9488;
+    }
+    if (heatmapMode === 'landuse') {
+        return LANDUSE_COLOR_HEX[item.params.usage] || 0x475569;
     }
     if (item.params.usage === 'Park' && heatmapMode !== 'density' && heatmapMode !== 'carbon') {
         return 0x047857;
     }
-
+    if (heatmapMode === 'far') {
+        const maxFar = Math.max(0.1, item.params.maxFar || 2.5);
+        const ratio = metrics.far / maxFar;
+        if (ratio > 1.001) return 0xdc2626;
+        return ratio < 0.5
+            ? lerpColorHex(0x0ea5e9, 0x10b981, ratio * 2)
+            : lerpColorHex(0x10b981, 0xf59e0b, (ratio - 0.5) * 2);
+    }
     if (heatmapMode === 'density') {
         const t = clamp01(metrics.densityPpHa / 800);
         return t < 0.5
@@ -1041,9 +1287,23 @@ function colorForParcel(item) {
 }
 
 function refreshParcelHeatmap() {
+    const tintBuildings = toggleBuildingHeatmapEl ? toggleBuildingHeatmapEl.checked : false;
     parcelFeatures.forEach(item => {
+        const hex = colorForParcel(item);
         if (item.parcelMesh && item.parcelMesh.material) {
-            item.parcelMesh.material.color.setHex(colorForParcel(item));
+            item.parcelMesh.material.color.setHex(hex);
+        }
+        if (item.buildingMesh && item.params.usage !== 'Park') {
+            item.buildingMesh.traverse(child => {
+                if (child.isMesh && Array.isArray(child.material) && child.material[1]) {
+                    const wallMat = child.material[1];
+                    if (tintBuildings) {
+                        wallMat.color.setHex(hex).lerp(new THREE.Color(0xffffff), 0.25);
+                    } else {
+                        wallMat.color.setHex(0xffffff);
+                    }
+                }
+            });
         }
     });
 }
@@ -1053,12 +1313,48 @@ function updateHeatmapLegend() {
     const labels = {
         score: ['Score heatmap', 'Red underperforms, amber is watchlist, green is strong.'],
         compliance: ['Compliance heatmap', 'Slate is compliant, red indicates active BCR/FAR/height conflict.'],
+        far: ['FAR utilization heatmap', 'Cyan is under-utilized, emerald is optimal, red exceeds Max FAR.'],
         density: ['Density heatmap', 'Blue is lower intensity, amber is mid-rise, violet is high-density.'],
-        carbon: ['Carbon heatmap', 'Green is lower operational carbon intensity, red is heavier impact.']
+        carbon: ['Carbon heatmap', 'Green is lower operational carbon intensity, red is heavier impact.'],
+        landuse: ['Land Use map', 'Amber: Residential | Teal: Mixed-Use | Blue: Commercial | Slate: Civic | Green: Park.']
     };
     const selected = labels[heatmapMode] || labels.score;
     legendTitleEl.textContent = selected[0];
     legendNoteEl.textContent = selected[1];
+}
+
+function pinCurrentAsBaseline(showNotification = false) {
+    if (!window.planxCitySummary) return;
+    baselineSummary = { ...window.planxCitySummary };
+    updateBaselineDeltas(window.planxCitySummary);
+    if (showNotification) {
+        showToast(`Pinned current scenario as baseline (Score ${baselineSummary.score}, GFA ${formatCompactNumber(baselineSummary.totalGfa, 'sqm')}).`, "success");
+    }
+}
+
+function setDeltaBadge(el, diff, suffix = '', invertGood = false) {
+    if (!el) return;
+    if (!Number.isFinite(diff) || Math.abs(diff) < 0.05) {
+        el.textContent = '0' + suffix + ' vs base';
+        el.className = 'score-delta';
+        return;
+    }
+    const sign = diff > 0 ? '+' : '';
+    const rounded = Math.abs(diff) >= 100 ? formatCompactNumber(diff) : (Number.isInteger(diff) ? diff : diff.toFixed(1));
+    el.textContent = `${sign}${rounded}${suffix}`;
+    const isGood = invertGood ? diff < 0 : diff > 0;
+    el.className = `score-delta ${isGood ? 'delta-pos' : 'delta-neg'}`;
+}
+
+function updateBaselineDeltas(summary) {
+    if (!baselineSummary) {
+        baselineSummary = { ...summary };
+    }
+    setDeltaBadge(deltaScoreEl, summary.score - baselineSummary.score, ' pts', false);
+    setDeltaBadge(deltaComplianceEl, summary.complianceRate - baselineSummary.complianceRate, '%', false);
+    setDeltaBadge(deltaGfaEl, summary.totalGfa - baselineSummary.totalGfa, ' sqm', false);
+    setDeltaBadge(deltaPopulationEl, summary.totalPopulation - baselineSummary.totalPopulation, ' pop', false);
+    setDeltaBadge(deltaCarbonEl, summary.totalCarbon - baselineSummary.totalCarbon, ' t', true);
 }
 
 function updateCitySummary() {
@@ -1098,10 +1394,11 @@ function updateCitySummary() {
         totalOpenSpace,
         maxZ
     };
+    updateBaselineDeltas(window.planxCitySummary);
     refreshParcelHeatmap();
 }
 
-function applyScenarioPreset(item, presetKey) {
+function applyScenarioPreset(item, presetKey, options = {}) {
     const preset = SCENARIO_PRESETS[presetKey] || SCENARIO_PRESETS.balanced;
     const updates = preset.apply(item);
     item.params = {
@@ -1110,10 +1407,16 @@ function applyScenarioPreset(item, presetKey) {
     };
     item.modified = true;
     rebuildParcel3D(item);
-    selectParcel(item);
-    updateDashboard(item);
+    if (selectedParcel === item) {
+        selectParcel(item, { keepMulti: true, skipCamera: true });
+        updateDashboard(item);
+    } else {
+        setBuildingHighlight(item.buildingMesh, selectedParcels.has(item));
+    }
     updateCitySummary();
-    showToast(`${preset.label} applied to parcel ${item.fid}.`, "success");
+    if (!options.silent) {
+        showToast(`${preset.label} applied to parcel ${item.fid}.`, "success");
+    }
 }
 
 function focusParcelCamera(item, options = {}) {
@@ -1144,6 +1447,11 @@ function updateSolarPhysics(timeVal) {
     // Math model of sun orbit path
     const angle = ((timeVal - 6) / 16) * Math.PI; // map 6:00-22:00 to 0-180 degrees
     const isNight = timeVal < 7.5 || timeVal > 19.5;
+    const altDeg = Math.round(Math.max(-18, Math.sin(angle) * 72));
+    const azDeg = Math.round(90 + ((timeVal - 6) / 16) * 180);
+    if (lblSolarAngles) {
+        lblSolarAngles.textContent = isNight ? `(Night · Alt ${altDeg}°)` : `(Alt ${altDeg}° · Az ${azDeg}°)`;
+    }
 
     // Dome Orbit position
     const radius = 500;
@@ -1155,10 +1463,10 @@ function updateSolarPhysics(timeVal) {
     if (window.sunSphere) {
         window.sunSphere.position.copy(dirLight.position);
         if (isNight) {
-            window.sunSphere.material.color.setHex(0xe2e8f0); // silver moon
+            window.sunSphere.material.color.setHex(0xe2e8f0);
             window.sunSphere.scale.setScalar(0.75);
         } else {
-            window.sunSphere.material.color.setHex(0xfef08a); // glowing yellow sun
+            window.sunSphere.material.color.setHex(0xfef08a);
             window.sunSphere.scale.setScalar(1.0);
         }
     }
@@ -1181,22 +1489,17 @@ function updateSolarPhysics(timeVal) {
     }
 
     if (isNight) {
-        ambientLight.color.setHex(0x1e1b4b); // Dim indigo light
+        ambientLight.color.setHex(0x1e1b4b);
         ambientLight.intensity = 0.25;
-        dirLight.intensity = 0.05; // Dim moon-like sun
+        dirLight.intensity = 0.05;
     } else {
-        // Daylight Mode
         ambientLight.color.setHex(0xffffff);
         ambientLight.intensity = 1.18;
-        
-        // Solar intensity peaks at noon
         const peakFactor = Math.sin(angle);
         dirLight.intensity = 0.92 + peakFactor * 0.7;
     }
 
-    // Update active building emission light and streetlights visibility
     parcelFeatures.forEach(item => {
-        // Toggle building window glow at night
         if (item.buildingMesh) {
             item.buildingMesh.traverse(child => {
                 if (child.isMesh && Array.isArray(child.material)) {
@@ -1208,7 +1511,6 @@ function updateSolarPhysics(timeVal) {
             });
         }
 
-        // Toggle streetlight bulb visibility
         if (item.sidewalkMesh) {
             item.sidewalkMesh.traverse(child => {
                 if (child.userData && child.userData.isStreetlightBulb) {
@@ -1218,7 +1520,6 @@ function updateSolarPhysics(timeVal) {
         }
     });
 
-    // Toggle headlights on traffic cars
     trafficCars.forEach(car => {
         car.carMesh.traverse(child => {
             if (child.userData && (child.userData.isHeadlight || child.userData.isTaillight)) {
@@ -1797,12 +2098,16 @@ function parseGeoJSON(data, options = {}) {
 
     centerX = (bounds.minX + bounds.maxX) / 2;
     centerY = (bounds.minY + bounds.maxY) / 2;
+    undoStack = [];
+    redoStack = [];
+    baselineSummary = null;
+    updateUndoRedoButtons();
 
     // 2. Parse features
     renderableFeatures.forEach(entry => {
         const f = entry.feature;
-        const fid = f.id !== undefined ? f.id : entry.index;
         const props = f.properties || {};
+        const fid = props._planx_fid !== undefined ? props._planx_fid : (f.id !== undefined ? f.id : entry.index);
 
         // Convert coordinates to local meters
         const localPoints = normalizePlanRing(entry.coords.map(pt => {
@@ -1894,12 +2199,12 @@ function updateParcelGroundColor(item, hasViolation) {
 
     if (item.params.usage === 'Park') {
         colorHex = 0x064e3b; // soft forest green for public parks
-    } else if (selectedParcel === item) {
+    } else if (selectedParcel === item || selectedParcels.has(item)) {
         colorHex = hasViolation ? 0xb91c1c : 0x0d9488; // active selection: bright red vs bright teal
     } else {
         colorHex = hasViolation ? 0x7f1d1d : 0x334155; // inactive: burgundy vs default slate
     }
-    
+
     item.parcelMesh.material.color.setHex(colorHex);
 }
 
@@ -4312,23 +4617,49 @@ function onDocumentClick(event) {
         const hitObject = intersects[0].object;
         const item = getParcelItemFromObject(hitObject);
         if (item) {
-            selectParcel(item);
+            if (event.shiftKey) {
+                if (selectedParcels.has(item) && selectedParcels.size > 1) {
+                    selectedParcels.delete(item);
+                    setBuildingHighlight(item.buildingMesh, false);
+                    rebuildParcel3D(item);
+                    const nextActive = Array.from(selectedParcels)[selectedParcels.size - 1];
+                    selectParcel(nextActive, { keepSelectionSet: true, skipFocus: true });
+                } else {
+                    selectedParcels.add(item);
+                    selectParcel(item, { keepSelectionSet: true, skipFocus: true });
+                }
+                showToast(`${selectedParcels.size} parcels selected for batch editing.`, "info");
+            } else {
+                selectParcel(item);
+            }
         }
-    } else {
+    } else if (!event.shiftKey) {
         deselectParcel();
     }
 }
 
 // Handle parcel selection, loading values to sliders
-function selectParcel(item) {
+function selectParcel(item, options = {}) {
     item.params = sanitizeParcelParams(item.params || {}, item.area, item.outerRing);
 
-    if (selectedParcel) {
+    if (!options.keepSelectionSet) {
+        selectedParcels.forEach(prev => {
+            if (prev !== item) {
+                setBuildingHighlight(prev.buildingMesh, false);
+            }
+        });
+        selectedParcels.clear();
+        selectedParcels.add(item);
+    } else {
+        selectedParcels.add(item);
+    }
+
+    if (selectedParcel && !selectedParcels.has(selectedParcel)) {
         setBuildingHighlight(selectedParcel.buildingMesh, false);
     }
 
     selectedParcel = item;
-    setBuildingHighlight(item.buildingMesh, true);
+    selectedParcels.forEach(sel => setBuildingHighlight(sel.buildingMesh, true));
 
     // Populate sliders
     inSetback.value = item.params.setback;
@@ -4339,10 +4670,10 @@ function selectParcel(item) {
     inTypology.value = item.params.typology;
     inUsage.value = item.params.usage;
     inRoofStyle.value = roofStyleForItem(item);
-    
+
     inStepbackInterval.value = item.params.stepbackInterval || 4;
     inStepbackDepth.value = item.params.stepbackDepth || 1.5;
-    
+
     // Zoning sliders
     inMaxBcr.value = item.params.maxBcr;
     inMaxFar.value = item.params.maxFar;
@@ -4357,7 +4688,7 @@ function selectParcel(item) {
     lblMaxBcr.textContent = item.params.maxBcr.toFixed(2);
     lblMaxFar.textContent = item.params.maxFar.toFixed(1);
     lblMaxHeight.textContent = item.params.maxHeight.toFixed(1);
-    
+
     lblStepbackInterval.textContent = item.params.stepbackInterval || 4;
     lblStepbackDepth.textContent = (item.params.stepbackDepth || 1.5).toFixed(1);
 
@@ -4368,15 +4699,19 @@ function selectParcel(item) {
         steppedTowerControlsEl.classList.add('hidden');
     }
 
-    metFid.textContent = item.fid;
+    metFid.textContent = selectedParcels.size > 1 ? `${item.fid} (+${selectedParcels.size - 1} more)` : item.fid;
     metArea.textContent = Math.round(item.area).toLocaleString() + " sq m";
 
     placeholderEl.classList.add('hidden');
     controlsEl.classList.remove('hidden');
 
     updateDashboard(item);
+    updateSelectionHud();
+    refreshParcelHeatmap();
     updateHeightLabels();
-    focusParcelCamera(item);
+    if (!options.skipFocus) {
+        focusParcelCamera(item);
+    }
 
     // Spawn 3D arrow height handle on top of building and setback handle on ground
     if (item.params.usage !== 'Park') {
@@ -4409,15 +4744,20 @@ function selectParcel(item) {
 
 // Deselect selected parcel and hide controls panel
 function deselectParcel() {
-    if (selectedParcel) {
-        const prevSelected = selectedParcel;
-        setBuildingHighlight(prevSelected.buildingMesh, false);
-        selectedParcel = null;
-        removeHeightHandle();
-        removeSetbackHandle();
-        removeScaleHandles();
-        rebuildParcel3D(prevSelected);
+    const prevList = Array.from(selectedParcels);
+    if (selectedParcel && !prevList.includes(selectedParcel)) {
+        prevList.push(selectedParcel);
     }
+    selectedParcels.clear();
+    selectedParcel = null;
+    removeHeightHandle();
+    removeSetbackHandle();
+    removeScaleHandles();
+    prevList.forEach(item => {
+        setBuildingHighlight(item.buildingMesh, false);
+        rebuildParcel3D(item);
+    });
+    updateSelectionHud();
 
     placeholderEl.classList.remove('hidden');
     controlsEl.classList.add('hidden');
@@ -4820,18 +5160,177 @@ function exportPlanningReport() {
     }
 }
 
+// Export 3D City Mesh as Wavefront .OBJ file
+function exportCityObjModel() {
+    try {
+        if (!parcelFeatures || parcelFeatures.length === 0) {
+            showToast("No 3D city model available to export.", "warning");
+            return;
+        }
+
+        const lines = [
+            "# PlanX Urban Procedural 3D - Wavefront OBJ Export",
+            `# Parcels: ${parcelFeatures.length}`,
+            ""
+        ];
+        let vertexOffset = 1;
+        const tempVec = new THREE.Vector3();
+
+        const appendMeshGroup = (rootObj, groupName) => {
+            if (!rootObj) return;
+            rootObj.updateMatrixWorld(true);
+            lines.push(`o ${groupName}`);
+            rootObj.traverse(child => {
+                if (!child.isMesh || !child.geometry) return;
+                const geom = child.geometry;
+                const pos = geom.attributes && geom.attributes.position;
+                if (!pos || pos.count < 3) return;
+
+                for (let i = 0; i < pos.count; i++) {
+                    tempVec.fromBufferAttribute(pos, i).applyMatrix4(child.matrixWorld);
+                    lines.push(`v ${tempVec.x.toFixed(3)} ${tempVec.y.toFixed(3)} ${tempVec.z.toFixed(3)}`);
+                }
+
+                if (geom.index) {
+                    const idx = geom.index;
+                    for (let i = 0; i + 2 < idx.count; i += 3) {
+                        const a = vertexOffset + idx.getX(i);
+                        const b = vertexOffset + idx.getX(i + 1);
+                        const c = vertexOffset + idx.getX(i + 2);
+                        lines.push(`f ${a} ${b} ${c}`);
+                    }
+                } else {
+                    for (let i = 0; i + 2 < pos.count; i += 3) {
+                        const a = vertexOffset + i;
+                        const b = vertexOffset + i + 1;
+                        const c = vertexOffset + i + 2;
+                        lines.push(`f ${a} ${b} ${c}`);
+                    }
+                }
+                vertexOffset += pos.count;
+            });
+        };
+
+        parcelFeatures.forEach((item, idx) => {
+            const fid = item.fid !== undefined ? item.fid : idx + 1;
+            if (item.parcelMesh) {
+                appendMeshGroup(item.parcelMesh, `Parcel_${fid}_Ground`);
+            }
+            if (item.buildingMesh) {
+                appendMeshGroup(item.buildingMesh, `Parcel_${fid}_${item.params.usage}_${item.params.typology}`);
+            }
+        });
+
+        roadMeshes.forEach((mesh, idx) => {
+            appendMeshGroup(mesh, `Road_Corridor_${idx + 1}`);
+        });
+
+        const objContent = lines.join("\n");
+        const blob = new Blob([objContent], { type: "text/plain;charset=utf-8;" });
+        const link = document.createElement("a");
+        const url = URL.createObjectURL(blob);
+        link.setAttribute("href", url);
+        link.setAttribute("download", "planx_urban_3d_model.obj");
+        link.style.visibility = "hidden";
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        showToast("Exported 3D city model (.OBJ).", "success");
+    } catch (e) {
+        console.error(e);
+        showToast("Failed to export 3D OBJ model.", "error");
+    }
+}
+
+// Extract exact 2D building footprint polygon(s) in global CRS coordinates for QGIS 3D Footprints layer
+function extractParcelBuildingFootprints(item, metrics) {
+    if (!item || !metrics || item.params.usage === 'Park') return [];
+    const insetRing = metrics.insetRing;
+    if (!insetRing || insetRing.length < 3) return [];
+
+    const toGeoRing = (ring) => (ring || []).map(pt => [pt.x + centerX, pt.y + centerY]);
+    const typology = item.params.typology || 'Tower';
+    const floors = item.params.floors || 1;
+    const floorH = item.params.floorHeight || 3.0;
+    const height = parseFloat((floors * floorH).toFixed(1));
+
+    if (typology === 'Courtyard') {
+        const innerRing = offsetPolygonRing(insetRing, 8);
+        const holes = (innerRing && innerRing.length >= 3) ? [toGeoRing(innerRing)] : [];
+        return [{ outer: toGeoRing(insetRing), holes, floors, height_m: height }];
+    }
+    if (typology === 'Slab') {
+        const pts = buildSlabShape(insetRing, 12).getPoints().map(pt => ({ x: pt.x, y: pt.y }));
+        return pts.length >= 3 ? [{ outer: toGeoRing(pts), holes: [], floors, height_m: height }] : [];
+    }
+    if (typology === 'LShape') {
+        const pts = buildLShape(insetRing, 12).getPoints().map(pt => ({ x: pt.x, y: pt.y }));
+        return pts.length >= 3 ? [{ outer: toGeoRing(pts), holes: [], floors, height_m: height }] : [];
+    }
+    if (typology === 'UShape') {
+        const pts = buildUShape(insetRing, 12).getPoints().map(pt => ({ x: pt.x, y: pt.y }));
+        return pts.length >= 3 ? [{ outer: toGeoRing(pts), holes: [], floors, height_m: height }] : [];
+    }
+    if (typology === 'PodiumTower') {
+        const podiumH = Math.min(height, 2 * floorH);
+        const podiumFloors = Math.max(1, Math.round(podiumH / floorH));
+        const out = [{ outer: toGeoRing(insetRing), holes: [], floors: podiumFloors, height_m: parseFloat(podiumH.toFixed(1)) }];
+        const towerRing = offsetPolygonRing(insetRing, 3.5);
+        if (towerRing && towerRing.length >= 3 && height > podiumH) {
+            out.push({ outer: toGeoRing(towerRing), holes: [], floors, height_m: height });
+        }
+        return out;
+    }
+    if (typology === 'MultiBuildingBlock') {
+        const ob = getOrientedBounds(insetRing);
+        const W = ob.W;
+        const localRing = insetRing.map(pt => {
+            const rx = pt.x - ob.cx;
+            const ry = pt.y - ob.cy;
+            return { x: rx * ob.ux + ry * ob.uy, y: rx * ob.nx + ry * ob.ny };
+        });
+        const out = [];
+        if (W >= 40) {
+            const floorsA = Math.max(1, Math.round(floors * 1.3));
+            const floorsB = Math.max(1, Math.round(floors * 0.7));
+            const localPoly1 = clipConvexPolygonVertical(localRing, ob.minX, ob.minX + W * 0.38);
+            const localPoly3 = clipConvexPolygonVertical(localRing, ob.minX + W * 0.62, ob.maxX);
+            if (localPoly1 && localPoly1.length >= 3) {
+                const globalPoly1 = localPoly1.map(pt => ({ x: ob.cx + pt.x * ob.ux + pt.y * ob.nx, y: ob.cy + pt.x * ob.uy + pt.y * ob.ny }));
+                const insetPoly1 = offsetPolygonRing(globalPoly1, 1.2);
+                if (insetPoly1 && insetPoly1.length >= 3) {
+                    out.push({ outer: toGeoRing(insetPoly1), holes: [], floors: floorsA, height_m: parseFloat((floorsA * floorH).toFixed(1)) });
+                }
+            }
+            if (localPoly3 && localPoly3.length >= 3) {
+                const globalPoly3 = localPoly3.map(pt => ({ x: ob.cx + pt.x * ob.ux + pt.y * ob.nx, y: ob.cy + pt.x * ob.uy + pt.y * ob.ny }));
+                const insetPoly3 = offsetPolygonRing(globalPoly3, 1.2);
+                if (insetPoly3 && insetPoly3.length >= 3) {
+                    out.push({ outer: toGeoRing(insetPoly3), holes: [], floors: floorsB, height_m: parseFloat((floorsB * floorH).toFixed(1)) });
+                }
+            }
+        }
+        if (out.length > 0) return out;
+    }
+
+    return [{ outer: toGeoRing(insetRing), holes: [], floors, height_m: height }];
+}
+
 // POST modifications back to the local Python QGIS server
 async function syncToQGIS() {
     let modifiedParcels = parcelFeatures.filter(item => item.modified);
-    
-    // Fallback: If no parcels are flagged as modified, but one is selected, sync that selected one
-    if (modifiedParcels.length === 0 && selectedParcel) {
-        selectedParcel.modified = true;
+
+    // Fallback: If no parcels are flagged as modified, sync selected parcels or all parcels in the scene
+    if (modifiedParcels.length === 0 && selectedParcels.size > 0) {
+        modifiedParcels = Array.from(selectedParcels);
+    } else if (modifiedParcels.length === 0 && selectedParcel) {
         modifiedParcels = [selectedParcel];
+    } else if (modifiedParcels.length === 0 && parcelFeatures.length > 0) {
+        modifiedParcels = parcelFeatures.slice();
     }
-    
+
     if (modifiedParcels.length === 0) {
-        showToast("No modifications to synchronize. Select a parcel and adjust sliders first.", "warning");
+        showToast("No parcels available to synchronize.", "warning");
         return;
     }
 
@@ -4841,7 +5340,7 @@ async function syncToQGIS() {
     const updates = modifiedParcels.map(item => {
         const metrics = calculateParcelMetrics(item);
         const insetRing = metrics.insetRing;
-        
+
         let geoCoords = [];
         if (insetRing) {
             geoCoords = insetRing.map(pt => {
@@ -4876,7 +5375,8 @@ async function syncToQGIS() {
             carbon: parseFloat(metrics.carbon.toFixed(1)),
             runoff: parseFloat(metrics.runoff.toFixed(3)),
             open_space: parseFloat(metrics.openSpaceArea.toFixed(1)),
-            coordinates: geoCoords
+            coordinates: geoCoords,
+            building_footprints: extractParcelBuildingFootprints(item, metrics)
         };
     });
 
@@ -4894,7 +5394,7 @@ async function syncToQGIS() {
         const res = await response.json();
         if (res.status === 'ok') {
             modifiedParcels.forEach(item => { item.modified = false; });
-            showToast(`Synced ${modifiedParcels.length} parcel modifications back to QGIS.`, "success");
+            showToast(`Synced ${modifiedParcels.length} parcels & 3D footprints back to QGIS.`, "success");
         } else {
             showToast("Synchronization failed: " + res.message, "error");
         }
@@ -5087,6 +5587,21 @@ function handleKeyboardShortcuts(event) {
     // Ignore shortcuts when typing in inputs
     if (event.target.tagName === 'INPUT' || event.target.tagName === 'SELECT' || event.target.tagName === 'TEXTAREA') return;
 
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+        event.preventDefault();
+        if (event.shiftKey) {
+            redoScenario();
+        } else {
+            undoScenario();
+        }
+        return;
+    }
+    if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+        event.preventDefault();
+        redoScenario();
+        return;
+    }
+
     switch (event.key.toLowerCase()) {
         case 'h':
         case '?':
@@ -5147,11 +5662,12 @@ function applyToAllParcels() {
         `Floor Height: ${templateParams.floorHeight}m\n` +
         `Mass Scale: X ${(templateParams.scaleX || 1).toFixed(2)} / Y ${(templateParams.scaleY || 1).toFixed(2)}\n` +
         `Setback: ${templateParams.setback}m\n\n` +
-        `This action cannot be undone.`
+        `You can undo this action with Ctrl+Z.`
     );
 
     if (!confirmed) return;
 
+    recordHistorySnapshot();
     btnApplyAll.disabled = true;
     btnApplyAll.textContent = 'Applying...';
 
@@ -5352,7 +5868,7 @@ async function reloadData() {
         btnReload.disabled = true;
         btnReload.textContent = "Reloading...";
     }
-    
+
     // Re-show loading screen
     if (loadingEl) {
         loadingEl.style.opacity = 1;
@@ -5362,9 +5878,9 @@ async function reloadData() {
     }
 
     try {
-        const response = await fetch('/data.geojson');
+        const response = await fetch('/data.geojson?refresh=1');
         if (!response.ok) throw new Error("Could not load data");
-        
+
         const data = await response.json();
         parseGeoJSON(data);
         
@@ -5750,6 +6266,7 @@ function onPointerDown(event) {
         if (scaleIntersects.length > 0) {
             const axis = scaleIntersects[0].object.parent?.userData?.axis || scaleIntersects[0].object.userData?.axis;
             if (axis) {
+                recordHistorySnapshot();
                 isDraggingScaleAxis = axis;
                 controls.enabled = false;
                 dragIntersectionPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.1);
@@ -5775,9 +6292,10 @@ function onPointerDown(event) {
     if (setbackHandleMesh) {
         const handleIntersects = raycaster.intersectObject(setbackHandleMesh, true);
         if (handleIntersects.length > 0) {
+            recordHistorySnapshot();
             isDraggingSetback = true;
             controls.enabled = false; // Disable camera rotation
-            
+
             // drag plane is the horizontal ground plane at y = 0.1
             dragIntersectionPlane = new THREE.Plane(new THREE.Vector3(0, 1, 0), -0.1);
             return;
@@ -5787,6 +6305,7 @@ function onPointerDown(event) {
     if (heightHandleMesh) {
         const handleIntersects = raycaster.intersectObject(heightHandleMesh, true);
         if (handleIntersects.length > 0) {
+            recordHistorySnapshot();
             isDraggingHeight = true;
             controls.enabled = false; // Disable camera rotation
 
@@ -6548,25 +7067,28 @@ function optimizeParcelZoning(item) {
     item.modified = true;
 }
 
-// Automatically solve and optimize zoning constraints for all parcels in the city
+// Automatically solve and optimize zoning constraints for selected or all parcels in the city
 function solveCityLayout() {
     if (!parcelFeatures || parcelFeatures.length === 0) {
         showToast("No parcels loaded to solve.", "warning");
         return;
     }
 
-    parcelFeatures.forEach(item => {
+    recordHistorySnapshot();
+    const targets = selectedParcels.size > 1 ? Array.from(selectedParcels) : parcelFeatures;
+
+    targets.forEach(item => {
         optimizeParcelZoning(item);
         rebuildParcel3D(item);
     });
 
     if (selectedParcel) {
-        selectParcel(selectedParcel);
+        selectParcel(selectedParcel, { keepSelectionSet: selectedParcels.size > 1, skipFocus: true });
         updateDashboard(selectedParcel);
     }
     updateCitySummary();
 
-    showToast(`Procedural solver optimized ${parcelFeatures.length} parcels.`, "success");
+    showToast(`Procedural solver optimized ${targets.length} parcel${targets.length === 1 ? '' : 's'}.`, "success");
 }
 
 // Procedural landscaping and facade assets

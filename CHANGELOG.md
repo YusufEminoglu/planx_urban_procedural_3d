@@ -1,5 +1,14 @@
 # Changelog
 
+## [0.6.0] - 2026-10-17
+
+- Redesigned official plugin icon on a matte deep-teal circular pedestal with glowing cyan rim, translucent emerald zoning envelope cage, terracotta/slate procedural massing blocks, and setback guideline vectors.
+- Fixed destructive parcel geometry overwrite during QGIS sync: source cadastral parcel boundaries are now preserved by default while a dedicated `PlanX 3D Building Footprints` layer is automatically generated and updated with exact building footprint polygons (including Courtyard inner holes, L/U/Slab shapes, Podium+Tower, and Multi-Building sub-blocks) and pre-configured 2D Land-Use + 3D Extrusion (`height_m`) styling.
+- Upgraded the QGIS Launcher Dialog into a 3-tab Studio cockpit with a 1-click **Generate Sample Urban Block (12 Parcels)** button, non-destructive sync options, Stop Server button, and live timestamped Sync Log.
+- Added deterministic `_planx_fid` feature ID round-trip injection and live `/data.geojson?refresh=1` layer re-export from QGIS.
+- Added Multi-Parcel `Shift+Click` and Quick-Select (`Same Use`, `Violations`, `All Buildable`) batch editing, `Undo` / `Redo` scenario history stack (`Ctrl+Z` / `Ctrl+Y`), and A/B Baseline Delta Scorecard (`Pin Baseline` with live delta badges).
+- Expanded scenario presets with **Perimeter Courtyard Block** and **High-Rise CBD Spine**, added 6 Heatmap modes (`PlanX Score`, `Zoning Compliance`, `FAR Utilization`, `Population Density`, `Carbon Intensity`, `Primary Land Use`) with optional 3D Building Tinting, Solar Altitude/Azimuth readout, and Wavefront 3D Mesh (`.OBJ`) exporter.
+
 ## [0.5.8] - 2026-09-17
 
 - Upgraded official plugin icon to high-end tactile 3D brand identity (isometric 45°, slim teal pedestal, full bleed transparent canvas).

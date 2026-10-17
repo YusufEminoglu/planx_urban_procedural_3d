@@ -1,4 +1,4 @@
-﻿<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="en">
 <head>
     <meta charset="UTF-8">
@@ -47,7 +47,7 @@
             if (loading) loading.style.display = 'none';
         };
     </script>
-    <link rel="stylesheet" href="style.css?v=0.5.0">
+    <link rel="stylesheet" href="style.css?v=0.6.0">
     <script type="importmap">
         {
             "imports": {
@@ -67,7 +67,7 @@
         <div class="spinner"></div>
         <h2>PlanX Urban Procedural 3D</h2>
         <p id="loading-text">Loading layer features from QGIS...</p>
-        <div class="version-badge">v0.5.0 - QGIS 4 Ready</div>
+        <div class="version-badge">v0.6.0 - QGIS 3 &amp; 4 Studio</div>
     </div>
 
     <div id="viewport"></div>
@@ -82,7 +82,7 @@
         </div>
 
         <div id="selection-placeholder" class="dock-note">
-            Click a parcel in the 3D scene to inspect it, tune planning controls, and send the result back to QGIS.
+            Click a parcel in the 3D scene (or <strong>Shift+Click</strong> multiple parcels) to inspect it, tune planning controls, and sync back to QGIS.
         </div>
 
         <div class="workflow-strip" aria-label="Workflow overview">
@@ -100,6 +100,15 @@
                 <span>Parcel Area:</span>
                 <span id="prop-area" class="stat-val">- sq m</span>
             </div>
+            <div class="stat-row">
+                <span>Active Selection:</span>
+                <span id="prop-selection-count" class="stat-val">1 parcel</span>
+            </div>
+            <div class="quick-select-row">
+                <button id="btn-select-same-use" class="quick-select-btn" type="button" title="Select all parcels with the same Primary Use">Same Use</button>
+                <button id="btn-select-violations" class="quick-select-btn" type="button" title="Select all parcels with active BCR/FAR/Height violations">Violations</button>
+                <button id="btn-select-all-buildable" class="quick-select-btn" type="button" title="Select all non-park buildable parcels">All Buildable</button>
+            </div>
 
             <hr class="divider">
 
@@ -111,6 +120,8 @@
                     <option value="balanced">Balanced Growth</option>
                     <option value="transit">Transit-Oriented Mix</option>
                     <option value="affordable">Affordable Mid-Rise</option>
+                    <option value="perimeter">Perimeter Courtyard Block</option>
+                    <option value="highrise">High-Rise CBD Core</option>
                     <option value="green">Low-Carbon Campus</option>
                     <option value="park">Public Realm Upgrade</option>
                 </select>
@@ -206,7 +217,7 @@
             </div>
 
             <div class="control-group">
-                <label>Solar Time: <span id="val-time">12:00</span></label>
+                <label>Solar Time: <span id="val-time">12:00</span> <small id="val-solar-angles" style="color: var(--text-secondary); font-weight: 600;">(Alt 72°)</small></label>
                 <div class="time-control-row">
                     <input type="range" id="input-time" min="6.0" max="22.0" step="0.1" value="12.0" style="flex: 1; margin: 0;">
                     <button id="btn-play-time" class="play-button" title="Animate solar shadows">Play</button>
@@ -246,6 +257,10 @@
                 <label class="checkbox-container">
                     <input type="checkbox" id="toggle-buildings" checked>
                     Show Buildings
+                </label>
+                <label class="checkbox-container">
+                    <input type="checkbox" id="toggle-building-heatmap">
+                    Tint 3D Buildings by Heatmap
                 </label>
                 <label class="checkbox-container">
                     <input type="checkbox" id="toggle-zoning">
@@ -369,33 +384,38 @@
                 <span id="metric-runoff" class="stat-val">-</span>
             </div>
 
-            <button id="btn-sync" class="sync-button">Sync Parameters to QGIS</button>
-            <button id="btn-apply-all" class="apply-all-button">Apply to All Parcels</button>
-            <button id="btn-reload" class="reload-button">Reload Data from QGIS</button>
-            <button id="btn-capture" class="capture-button">Download Viewport Capture</button>
+            <button id="btn-sync" class="sync-button">Sync Parameters &amp; 3D Footprints to QGIS</button>
+            <button id="btn-solve-selected" class="solve-selected-button">Auto-Solve Selected Parcel(s)</button>
+            <button id="btn-apply-all" class="apply-all-button">Propagate to All Buildable Parcels</button>
+            <button id="btn-reload" class="reload-button">Reload Live Data from QGIS</button>
+            <button id="btn-export-obj" class="export-obj-button">Export 3D City Mesh (.OBJ)</button>
             <button id="btn-export-csv" class="export-csv-button">Export Planning Report (CSV)</button>
-            <button id="btn-solve-selected" class="solve-selected-button">Auto-Solve Selected Parcel</button>
+            <button id="btn-capture" class="capture-button">Download Viewport Capture (PNG)</button>
         </div>
     </div>
 
     <div class="hud-bar glass-panel">
         <div class="hud-chip brand-chip">PlanX Urban 3D</div>
-        <div class="hud-chip">Total Parcels: <span id="hud-total-parcels">0</span></div>
+        <div class="hud-chip">Parcels: <span id="hud-total-parcels">0</span></div>
         <div class="hud-chip">Max Z: <span id="hud-max-z">0 m</span></div>
         <label class="hud-chip heatmap-chip">Heatmap
             <select id="input-heatmap-mode" aria-label="Heatmap mode">
                 <option value="score">Score</option>
                 <option value="compliance">Compliance</option>
+                <option value="far">FAR Utilization</option>
                 <option value="density">Density</option>
                 <option value="carbon">Carbon</option>
+                <option value="landuse">Land Use</option>
             </select>
         </label>
+        <div id="btn-undo" class="hud-chip hud-btn" title="Undo last scenario change (Ctrl+Z)">↶ Undo</div>
+        <div id="btn-redo" class="hud-chip hud-btn" title="Redo scenario change (Ctrl+Y)">↷ Redo</div>
         <div id="btn-solve-city" class="hud-chip hud-btn solve-city-chip" title="Optimize all parcels against BCR/FAR constraints">Auto-Solve City</div>
         <div id="btn-tour" class="hud-chip hud-btn" title="Toggle cinematic orbit camera">Cinematic Tour</div>
         <div id="btn-measure" class="hud-chip hud-btn" title="Toggle 3D ruler and measurement tool">Measure</div>
         <div id="hud-btn-clear-measure" class="hud-chip hud-btn hidden" style="color: #ef4444;" title="Clear all 3D measurements">Clear</div>
         <div id="btn-guide" class="hud-chip hud-btn" title="Open quick guide">Guide</div>
-        <div class="hud-chip hud-shortcuts" title="R: Reset camera | F: Focus selected | N: Toggle night | G: Toggle grid | H: Guide">
+        <div class="hud-chip hud-shortcuts" title="Ctrl+Z/Y: Undo/Redo | Shift+Click: Multi-select | R: Reset camera | F: Focus | N: Night | G: Grid | H: Guide">
             Shortcuts
         </div>
     </div>
@@ -404,22 +424,30 @@
         <div class="scorecell scorecell-primary">
             <span class="score-label">PlanX Score</span>
             <strong id="city-score">-</strong>
+            <small id="delta-score" class="score-delta">Baseline</small>
         </div>
         <div class="scorecell">
             <span class="score-label">Compliant</span>
             <strong id="city-compliance-rate">-</strong>
+            <small id="delta-compliance" class="score-delta">-</small>
         </div>
         <div class="scorecell">
             <span class="score-label">Total GFA</span>
             <strong id="city-gfa">-</strong>
+            <small id="delta-gfa" class="score-delta">-</small>
         </div>
         <div class="scorecell">
             <span class="score-label">Population</span>
             <strong id="city-population">-</strong>
+            <small id="delta-population" class="score-delta">-</small>
         </div>
         <div class="scorecell">
             <span class="score-label">Carbon</span>
             <strong id="city-carbon">-</strong>
+            <small id="delta-carbon" class="score-delta">-</small>
+        </div>
+        <div class="scorecell scorecell-action">
+            <button id="btn-pin-baseline" class="pin-baseline-btn" type="button" title="Pin current city state as baseline to compare scenario deltas">Pin Baseline</button>
         </div>
     </section>
 
@@ -444,43 +472,43 @@
         <div class="guide-grid">
             <article class="guide-step">
                 <span class="guide-step-no">1</span>
-                <h3>Prepare a QGIS layer</h3>
-                <p>Select a polygon vector layer that represents parcels, blocks, or development sites. A projected CRS in meters gives the most reliable distances and areas.</p>
+                <h3>Prepare or generate a QGIS layer</h3>
+                <p>Select a polygon vector layer or click <strong>Generate Sample Urban Block</strong> in the QGIS dialog to create a 12-parcel metric district.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">2</span>
-                <h3>Launch the cockpit</h3>
-                <p>Choose the layer in the QGIS launcher, keep the suggested local port unless needed, and start the browser cockpit.</p>
+                <h3>Select single or multiple parcels</h3>
+                <p>Click any parcel to inspect it, or hold <strong>Shift+Click</strong> (or use <em>Same Use / Violations</em> buttons) to edit multiple parcels simultaneously.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">3</span>
-                <h3>Select a parcel</h3>
-                <p>Click a parcel or generated building in the 3D scene. The right panel opens its controls, limits, and live performance metrics.</p>
+                <h3>Tune typologies &amp; presets</h3>
+                <p>Adjust setbacks, floors, floor height, use, roof style, and 8 building typologies, or apply one of 7 urban design presets. Use <strong>Ctrl+Z / Ctrl+Y</strong> to undo/redo.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">4</span>
-                <h3>Tune the scenario</h3>
-                <p>Adjust setbacks, floors, floor height, use, roof style, and building typology. The massing model updates immediately in the scene.</p>
+                <h3>Compare against baseline</h3>
+                <p>Click <strong>Pin Baseline</strong> in the bottom scorecard to track live GFA, Population, Carbon, Compliance, and PlanX Score deltas across scenarios.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">5</span>
-                <h3>Check compliance</h3>
-                <p>The dashboard tracks BCR, FAR, height, population, open space, carbon, and runoff. Red states indicate a limit that needs attention.</p>
+                <h3>Analyze with 6 heatmaps</h3>
+                <p>Switch between Score, Compliance, FAR Utilization, Density, Carbon, and Land Use heatmaps — and optionally tint 3D building volumes directly.</p>
             </article>
             <article class="guide-step">
                 <span class="guide-step-no">6</span>
-                <h3>Write back to QGIS</h3>
-                <p>Use the Sync to QGIS action to store edited parameters, calculated metrics, and optional geometry changes back into the active layer.</p>
+                <h3>Sync to QGIS &amp; export 3D</h3>
+                <p>Press <strong>Sync to QGIS</strong> to update parcel attributes and generate the <strong>PlanX 3D Building Footprints</strong> layer, or export a 3D <code>.OBJ</code> mesh.</p>
             </article>
         </div>
 
         <div class="guide-note">
-            <strong>Tips:</strong> Auto-Solve Selected Parcel optimizes the active parcel. Auto-Solve City optimizes all parcels. R resets the camera, F focuses the selected parcel, N toggles day/night lighting, and G toggles the ground grid.
+            <strong>Shortcuts:</strong> <code>Ctrl+Z</code> Undo | <code>Ctrl+Y</code> Redo | <code>Shift+Click</code> Multi-select | <code>R</code> Reset camera | <code>F</code> Focus parcel | <code>N</code> Toggle day/night | <code>G</code> Toggle grid | <code>H</code> Guide.
         </div>
     </section>
 
     <div id="measurement-overlay-container" style="position: absolute; top: 0; left: 0; pointer-events: none; z-index: 15; width: 100%; height: 100%; overflow: hidden;"></div>
 
-    <script type="module" src="app.js?v=0.5.0"></script>
+    <script type="module" src="app.js?v=0.6.0"></script>
 </body>
 </html>

@@ -45,10 +45,24 @@ class SyncHTTPRequestHandler(BaseHTTPRequestHandler):
         url = self.path.split('?')[0]
 
         if url == "/data.geojson":
+            if "refresh=1" in self.path and getattr(self.server, "refresh_callback", None):
+                from contextlib import suppress
+                with suppress(Exception):
+                    refreshed = self.server.refresh_callback()
+                    if isinstance(refreshed, str) and refreshed.strip():
+                        self.server.geojson_data = refreshed
             self.send_response(200)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.end_headers()
             self.wfile.write(self.server.geojson_data.encode('utf-8'))
+            return
+
+        if url == "/status":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.end_headers()
+            payload = {"status": "ok", "port": getattr(self.server, "server_port", 0)}
+            self.wfile.write(json.dumps(payload).encode("utf-8"))
             return
 
         # Serve static assets
@@ -120,10 +134,11 @@ class SyncHTTPRequestHandler(BaseHTTPRequestHandler):
 
 
 class PlanXProceduralServer:
-    def __init__(self, port: int, web_dir: str, sync_callback=None):
+    def __init__(self, port: int, web_dir: str, sync_callback=None, refresh_callback=None):
         self.port = port
         self.web_dir = web_dir
         self.sync_callback = sync_callback
+        self.refresh_callback = refresh_callback
         self.geojson_data = "{}"
         self.httpd = None
         self.thread = None
@@ -147,6 +162,7 @@ class PlanXProceduralServer:
             )
         self.httpd.web_dir = self.web_dir
         self.httpd.sync_callback = self.sync_callback
+        self.httpd.refresh_callback = self.refresh_callback
         self.httpd.geojson_data = self.geojson_data
 
         def serve():
@@ -168,3 +184,4 @@ class PlanXProceduralServer:
         if self.thread:
             self.thread.join(timeout=1.0)
             self.thread = None
+

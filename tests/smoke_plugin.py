@@ -183,6 +183,122 @@ def test_lifecycle(iface):
     )
 
 
+def test_sample_layer_and_non_destructive_sync(iface):
+    import json
+    from qgis.core import QgsProject
+    from planx_urban_procedural_3d.main_plugin import PlanXUrbanProcedural3D
+    from planx_urban_procedural_3d.dialog import PluginDialog
+
+    QgsProject.instance().removeAllMapLayers()
+    plugin = PlanXUrbanProcedural3D(iface)
+    plugin.dialog = PluginDialog(iface, iface.mainWindow())
+
+    layer = plugin.create_sample_urban_layer()
+    plugin.active_layer = layer
+    iface.activeLayer = lambda: layer
+
+    if layer is None or layer.featureCount() != 12 or layer.crs().isGeographic():
+        return _ok("sample urban block layer created (12 metric parcels)", False, f"layer={layer}")
+
+    first_feat = next(layer.getFeatures())
+    orig_fid = int(first_feat.id())
+    orig_area = float(first_feat.geometry().area())
+
+    raw_geojson = plugin._export_active_layer_geojson()
+    parsed = json.loads(raw_geojson)
+    feats = parsed.get("features", [])
+    exported_fids = [f.get("properties", {}).get("_planx_fid") for f in feats]
+    if len(feats) != 12 or orig_fid not in exported_fids:
+        return _ok("GeoJSON export preserves deterministic _planx_fid", False, f"fids={exported_fids}")
+
+    # Sync with shrunken coordinates and a Courtyard footprint with an inner hole
+    payload = {
+        "updates": [
+            {
+                "id": orig_fid,
+                "far": 2.4,
+                "bcr": 0.42,
+                "gfa": 6400,
+                "setback": 4.0,
+                "scale_x": 1.0,
+                "scale_y": 1.0,
+                "floors": 6,
+                "floor_h": 3.2,
+                "typology": "Courtyard",
+                "usage": "MixedUse",
+                "max_bcr": 0.55,
+                "max_far": 2.8,
+                "max_height": 24.0,
+                "roof_style": "Flat",
+                "stepback_i": 4,
+                "stepback_d": 1.5,
+                "plan_score": 88,
+                "const_load": 0.85,
+                "height_m": 19.2,
+                "z_base": 0.0,
+                "z_top": 19.2,
+                "pop_est": 150,
+                "carbon": 352.0,
+                "runoff": 0.465,
+                "open_space": 1400.0,
+                "coordinates": [
+                    [3015005.0, 4640005.0],
+                    [3015055.0, 4640005.0],
+                    [3015055.0, 4640035.0],
+                    [3015005.0, 4640035.0],
+                ],
+                "building_footprints": [
+                    {
+                        "outer": [
+                            [3015005.0, 4640005.0],
+                            [3015055.0, 4640005.0],
+                            [3015055.0, 4640035.0],
+                            [3015005.0, 4640035.0],
+                        ],
+                        "holes": [
+                            [
+                                [3015015.0, 4640012.0],
+                                [3015045.0, 4640012.0],
+                                [3015045.0, 4640028.0],
+                                [3015015.0, 4640028.0],
+                            ]
+                        ],
+                        "floors": 6,
+                        "height_m": 19.2,
+                    }
+                ],
+            }
+        ]
+    }
+    plugin._sync_to_qgis(payload)
+
+    updated_feat = layer.getFeature(orig_fid)
+    after_area = float(updated_feat.geometry().area())
+    geom_preserved = abs(after_area - orig_area) < 0.01
+    attrs_updated = (
+        int(updated_feat["floors"]) == 6
+        and str(updated_feat["typology"]) == "Courtyard"
+        and int(updated_feat["plan_score"]) == 88
+    )
+
+    fp_layers = QgsProject.instance().mapLayersByName("PlanX 3D Building Footprints")
+    fp_ok = False
+    if fp_layers:
+        fp_layer = fp_layers[0]
+        if fp_layer.featureCount() == 1:
+            fp_feat = next(fp_layer.getFeatures())
+            fp_poly = fp_feat.geometry().asPolygon()
+            fp_ok = len(fp_poly) == 2 and abs(float(fp_feat["height_m"]) - 19.2) < 0.01
+
+    plugin.dialog.close()
+    QgsProject.instance().removeAllMapLayers()
+    return _ok(
+        "sample block, non-destructive parcel sync & 3D footprints layer",
+        geom_preserved and attrs_updated and fp_ok,
+        f"geom_preserved={geom_preserved} attrs_updated={attrs_updated} fp_ok={fp_ok}",
+    )
+
+
 def run_all(iface):
     print("=" * 60)
     print(" planx_urban_procedural_3d - lifecycle smoke")
@@ -193,6 +309,7 @@ def run_all(iface):
         test_icon_exists(),
         test_class_factory(),
         test_lifecycle(iface),
+        test_sample_layer_and_non_destructive_sync(iface),
     ]
     passed = sum(1 for r in results if r)
     print("-" * 60)
