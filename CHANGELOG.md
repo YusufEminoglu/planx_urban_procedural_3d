@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.0] - 2026-10-20
+
+- Performance overhaul (demand rendering, progressive building, memory leak cleanup), CRS HUD chip, and illustrated Reference Manual with real QGIS screenshots
+
 ## [0.6.0] - 2026-10-17
 
 - Redesigned official plugin icon on a matte deep-teal circular pedestal with glowing cyan rim, translucent emerald zoning envelope cage, terracotta/slate procedural massing blocks, and setback guideline vectors.

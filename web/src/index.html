@@ -47,7 +47,7 @@
             if (loading) loading.style.display = 'none';
         };
     </script>
-    <link rel="stylesheet" href="style.css?v=0.6.0">
+    <link rel="stylesheet" href="style.css?v=0.7.0">
     <script type="importmap">
         {
             "imports": {
@@ -398,6 +398,7 @@
         <div class="hud-chip brand-chip">PlanX Urban 3D</div>
         <div class="hud-chip">Parcels: <span id="hud-total-parcels">0</span></div>
         <div class="hud-chip">Max Z: <span id="hud-max-z">0 m</span></div>
+        <div class="hud-chip hud-chip-crs" title="Coordinate reference system of the loaded layer">CRS: <span id="hud-crs">local</span></div>
         <label class="hud-chip heatmap-chip">Heatmap
             <select id="input-heatmap-mode" aria-label="Heatmap mode">
                 <option value="score">Score</option>
@@ -509,6 +510,6 @@
 
     <div id="measurement-overlay-container" style="position: absolute; top: 0; left: 0; pointer-events: none; z-index: 15; width: 100%; height: 100%; overflow: hidden;"></div>
 
-    <script type="module" src="app.js?v=0.6.0"></script>
+    <script type="module" src="app.js?v=0.7.0"></script>
 </body>
 </html>

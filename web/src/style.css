@@ -404,6 +404,19 @@ input[type="range"]::-webkit-slider-thumb:hover {
     letter-spacing: 0.02em;
 }
 
+/* CRS names can be long (EPSG:3857 / WGS 84 / Pseudo-Mercator); keep the HUD
+   from stretching and clip with an ellipsis instead. */
+.hud-chip-crs {
+    max-width: 190px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.hud-chip-crs span {
+    font-weight: 700;
+}
+
 .heatmap-chip {
     display: flex;
     align-items: center;

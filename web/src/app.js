@@ -37,6 +37,9 @@ let measurementPoints = [];
 let tempMeasureLine = null;
 let tempMeasureLabel = null;
 let savedMeasurements = [];
+// Last scene hit under the cursor while the ruler tool is armed (shared by the
+// pointer handler and the label projector to avoid a duplicated raycast).
+let lastMeasurementHit = null;
 
 // Height Dragging State
 let heightHandleMesh = null;
@@ -67,6 +70,18 @@ let groundTexture = null;
 
 const LARGE_EXTENT_FOCUS_THRESHOLD = 1200;
 const DEFAULT_CAMERA_DISTANCE = 320;
+const MAX_PIXEL_RATIO = 1.75;
+const LARGE_SCENE_PARCEL_THRESHOLD = 140;
+const PROGRESSIVE_BUILD_THRESHOLD = 60;
+const PROGRESSIVE_BUILD_CHUNK = 6;
+const OVERLAY_REFRESH_INTERVAL_MS = 66;
+
+// Render-loop state: only redraw when the scene actually needs it.
+let needsRender = true;
+let usePostProcessing = true;
+let sceneBuildToken = 0;
+let lastOverlayRefresh = 0;
+let lastNightMode = null;
 
 // Setup UI Element references
 const loadingEl = document.getElementById('loading');
@@ -401,18 +416,26 @@ function init() {
     camera.position.set(0, 180, 280);
 
     // 4. Renderer setup
-    renderer = new THREE.WebGLRenderer({ antialias: true, preserveDrawingBuffer: true });
+    // preserveDrawingBuffer is intentionally off: keeping it on forces an extra
+    // GPU copy every frame. captureViewport() renders immediately before reading
+    // the canvas, which is enough for a deterministic PNG.
+    renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    renderer.setPixelRatio(window.devicePixelRatio);
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
     renderer.setClearColor(0xe9f7ff, 1);
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    // Static sun most of the time: shadows are refreshed on demand instead of
+    // re-rendering every shadow-casting mesh at 60 fps.
+    renderer.shadowMap.autoUpdate = false;
+    renderer.shadowMap.needsUpdate = true;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1.32;
     document.getElementById('viewport').appendChild(renderer.domElement);
 
     // 5. Post-Processing Bloom
     composer = new EffectComposer(renderer);
+    composer.setPixelRatio(renderer.getPixelRatio());
     const renderPass = new RenderPass(scene, camera);
     composer.addPass(renderPass);
     const bloomPass = new UnrealBloomPass(
@@ -430,6 +453,7 @@ function init() {
     controls.enableDamping = true;
     controls.dampingFactor = 0.05;
     controls.maxPolarAngle = Math.PI / 2 - 0.02;
+    controls.addEventListener('change', () => { needsRender = true; });
     controls.addEventListener('start', () => {
         if (isCinematicTour) {
             isCinematicTour = false;
@@ -555,7 +579,11 @@ function init() {
 // Render loop
 function animate() {
     requestAnimationFrame(animate);
-    
+
+    // Browsers throttle rAF in background tabs; skip all work when hidden so
+    // the plugin does not burn a CPU core while the user is in QGIS.
+    if (document.hidden) return;
+
     // Auto orbit camera for Cinematic Tour
     if (isCinematicTour) {
         const offset = new THREE.Vector3().subVectors(camera.position, controls.target);
@@ -564,30 +592,72 @@ function animate() {
         angle += 0.002; // slow orbit speed
         camera.position.x = controls.target.x + radius * Math.cos(angle);
         camera.position.z = controls.target.z + radius * Math.sin(angle);
+        needsRender = true;
     }
-    
-    // Update controls
+
+    // Update controls (fires 'change' -> needsRender while damping settles)
     controls.update();
 
-    // Update traffic cars positions
-    updateTraffic();
+    if (!toggleTrafficEl || toggleTrafficEl.checked) updateTraffic();
+    if (!togglePedestriansEl || togglePedestriansEl.checked) updatePedestrians();
 
-    // Update pedestrian positions
-    updatePedestrians();
+    // DOM overlays are comparatively expensive; 15 Hz is visually smooth.
+    const now = performance.now();
+    if (now - lastOverlayRefresh >= OVERLAY_REFRESH_INTERVAL_MS) {
+        updateMeasurementLabels();
+        updateHeightLabels();
+        lastOverlayRefresh = now;
+    }
 
-    // Update 3D ruler tool labels screen positions
-    updateMeasurementLabels();
-    updateHeightLabels();
-
-    composer.render();
+    if (needsRender) {
+        if (usePostProcessing) {
+            composer.render();
+        } else {
+            renderer.render(scene, camera);
+        }
+        needsRender = false;
+    }
 }
 
 // Resize handler
 function onWindowResize() {
     camera.aspect = window.innerWidth / window.innerHeight;
     camera.updateProjectionMatrix();
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO));
     renderer.setSize(window.innerWidth, window.innerHeight);
+    composer.setPixelRatio(renderer.getPixelRatio());
     composer.setSize(window.innerWidth, window.innerHeight);
+    needsRender = true;
+}
+
+// Ask for one shadow-map refresh (sun moved, geometry rebuilt, scene loaded).
+function requestShadowUpdate() {
+    if (renderer) renderer.shadowMap.needsUpdate = true;
+    needsRender = true;
+}
+
+// Switch expensive post-processing off for very large layers.
+function configureRenderQualityForScene() {
+    const heavy = parcelFeatures.length > LARGE_SCENE_PARCEL_THRESHOLD;
+    usePostProcessing = !heavy;
+    if (renderer) {
+        const ratio = heavy
+            ? Math.min(window.devicePixelRatio || 1, 1.25)
+            : Math.min(window.devicePixelRatio || 1, MAX_PIXEL_RATIO);
+        renderer.setPixelRatio(ratio);
+        composer.setPixelRatio(ratio);
+    }
+    if (dirLight && dirLight.shadow) {
+        const size = heavy ? 1024 : 2048;
+        if (dirLight.shadow.mapSize.width !== size) {
+            dirLight.shadow.mapSize.set(size, size);
+            if (dirLight.shadow.map) {
+                dirLight.shadow.map.dispose();
+                dirLight.shadow.map = null;
+            }
+        }
+    }
+    requestShadowUpdate();
 }
 
 function captureScenarioSnapshot() {
@@ -675,6 +745,25 @@ function updateSelectionHud() {
     }
 }
 
+// Coalesce dashboard + city summary refresh into a single frame. Both walk the
+// parcel list, and both used to run once per 'input' event during a drag.
+let aggregateRefreshItem = null;
+let aggregateRefreshQueued = false;
+
+function scheduleAggregateRefresh(item) {
+    if (item) aggregateRefreshItem = item;
+    if (aggregateRefreshQueued) return;
+    aggregateRefreshQueued = true;
+    requestAnimationFrame(() => {
+        aggregateRefreshQueued = false;
+        const target = aggregateRefreshItem || selectedParcel;
+        aggregateRefreshItem = null;
+        if (!target) return;
+        updateDashboard(target);
+        updateCitySummary();
+    });
+}
+
 // Set up UI input controls event handlers
 function setupInputListeners() {
     let sliderSnapshotRecorded = false;
@@ -692,7 +781,14 @@ function setupInputListeners() {
         .filter(Boolean)
         .forEach(el => {
             el.addEventListener('pointerdown', recordOncePerDrag);
-            el.addEventListener('pointerup', resetDragSnapshotFlag);
+            el.addEventListener('pointerup', () => {
+                resetDragSnapshotFlag();
+                // 'change' normally restores full detail; this is the safety net for
+                // drags that end without one (pointer released outside the slider).
+                setTimeout(() => {
+                    if (draftDirtyItems.size > 0) endDraftRebuild();
+                }, 200);
+            });
             el.addEventListener('change', resetDragSnapshotFlag);
         });
 
@@ -708,6 +804,10 @@ function setupInputListeners() {
 
         const targets = getActiveTargetParcels();
         const changedId = event && event.target ? event.target.id : null;
+        // Dragging a range slider emits 'input' at pointer rate. Use the lightweight
+        // draft geometry during the drag and restore full detail on 'change'.
+        const isContinuous = !!event && event.type === 'input';
+        draftRebuildMode = isContinuous;
 
         targets.forEach(targetItem => {
             targetItem.modified = true;
@@ -726,8 +826,7 @@ function setupInputListeners() {
             if (!changedId || changedId === 'input-max-height') targetItem.params.maxHeight = parseFloat(inMaxHeight.value);
 
             targetItem.params = sanitizeParcelParams(targetItem.params, targetItem.area, targetItem.outerRing);
-            rebuildParcel3D(targetItem);
-            setBuildingHighlight(targetItem.buildingMesh, true);
+            scheduleParcelRebuild(targetItem, { draft: isContinuous });
         });
 
         // Update labels from primary selectedParcel
@@ -749,8 +848,7 @@ function setupInputListeners() {
             steppedTowerControlsEl.classList.add('hidden');
         }
 
-        updateDashboard(selectedParcel);
-        updateCitySummary();
+        scheduleAggregateRefresh(selectedParcel);
         updateScaleHandles();
 
         if (selectedParcel.params.usage !== 'Park') {
@@ -994,6 +1092,9 @@ function setupInputListeners() {
 }
 
 function isUiEventTarget(target) {
+    // Synthetic or programmatic events may have no Element target; never throw
+    // from a pointer handler because of it.
+    if (!target || typeof target.closest !== 'function') return false;
     return !!(
         target.closest('#control-dock') ||
         target.closest('.hud-bar') ||
@@ -1286,14 +1387,35 @@ function colorForParcel(item) {
     return lerpColorHex(0xf59e0b, 0x10b981, (score - 55) / 45);
 }
 
-function refreshParcelHeatmap() {
+function refreshParcelHeatmap(immediate) {
+    // Called from slider input, selection and summary updates. Coalesce bursts
+    // into one pass per frame instead of walking the whole scene each event.
+    if (immediate !== true) {
+        if (heatmapRefreshQueued) return;
+        heatmapRefreshQueued = true;
+        requestAnimationFrame(() => {
+            heatmapRefreshQueued = false;
+            applyParcelHeatmap();
+        });
+        return;
+    }
+    applyParcelHeatmap();
+}
+
+let heatmapRefreshQueued = false;
+let buildingTintActive = false;
+
+function applyParcelHeatmap() {
     const tintBuildings = toggleBuildingHeatmapEl ? toggleBuildingHeatmapEl.checked : false;
+    const mustResetBuildings = buildingTintActive || tintBuildings;
     parcelFeatures.forEach(item => {
         const hex = colorForParcel(item);
         if (item.parcelMesh && item.parcelMesh.material) {
             item.parcelMesh.material.color.setHex(hex);
         }
-        if (item.buildingMesh && item.params.usage !== 'Park') {
+        // Walking every facade mesh is only required while building tinting is
+        // (or was) on; otherwise the walls already sit at their base white.
+        if (mustResetBuildings && item.buildingMesh && item.params.usage !== 'Park') {
             item.buildingMesh.traverse(child => {
                 if (child.isMesh && Array.isArray(child.material) && child.material[1]) {
                     const wallMat = child.material[1];
@@ -1306,6 +1428,8 @@ function refreshParcelHeatmap() {
             });
         }
     });
+    buildingTintActive = tintBuildings;
+    needsRender = true;
 }
 
 function updateHeatmapLegend() {
@@ -1458,6 +1582,8 @@ function updateSolarPhysics(timeVal) {
     dirLight.position.x = Math.cos(angle + Math.PI) * radius;
     dirLight.position.y = Math.sin(angle) * radius;
     dirLight.position.z = 100;
+    // The sun moved, so the cached shadow map is stale.
+    requestShadowUpdate();
 
     // Update Sun/Moon sphere mesh
     if (window.sunSphere) {
@@ -1499,34 +1625,43 @@ function updateSolarPhysics(timeVal) {
         dirLight.intensity = 0.92 + peakFactor * 0.7;
     }
 
-    parcelFeatures.forEach(item => {
-        if (item.buildingMesh) {
-            item.buildingMesh.traverse(child => {
-                if (child.isMesh && Array.isArray(child.material)) {
-                    const wallMaterial = child.material[1];
-                    if (wallMaterial && wallMaterial.emissiveMap) {
-                        wallMaterial.emissiveIntensity = isNight ? 1.0 : 0.0;
+    // Night-only emissive windows and street lamps. This traversal used to run on
+    // every time-slider tick; the state only changes when day flips to night, so
+    // touching every parcel mesh is now limited to that single transition.
+    const nightChanged = lastNightMode !== isNight;
+    lastNightMode = isNight;
+    if (nightChanged) {
+        parcelFeatures.forEach(item => {
+            if (item.buildingMesh) {
+                item.buildingMesh.traverse(child => {
+                    if (child.isMesh && Array.isArray(child.material)) {
+                        const wallMaterial = child.material[1];
+                        if (wallMaterial && wallMaterial.emissiveMap) {
+                            wallMaterial.emissiveIntensity = isNight ? 1.0 : 0.0;
+                        }
                     }
-                }
-            });
-        }
+                });
+            }
 
-        if (item.sidewalkMesh) {
-            item.sidewalkMesh.traverse(child => {
-                if (child.userData && child.userData.isStreetlightBulb) {
+            if (item.sidewalkMesh) {
+                item.sidewalkMesh.traverse(child => {
+                    if (child.userData && (child.userData.isStreetlightBulb || child.userData.isStreetlightGlow)) {
+                        child.visible = isNight;
+                    }
+                });
+            }
+        });
+
+        trafficCars.forEach(car => {
+            car.carMesh.traverse(child => {
+                if (child.userData && (child.userData.isHeadlight || child.userData.isTaillight)) {
                     child.visible = isNight;
                 }
             });
-        }
-    });
-
-    trafficCars.forEach(car => {
-        car.carMesh.traverse(child => {
-            if (child.userData && (child.userData.isHeadlight || child.userData.isTaillight)) {
-                child.visible = isNight;
-            }
         });
-    });
+    }
+
+    needsRender = true;
 }
 
 function defaultTypologyForBlock(area, usage = 'Residential', ring = null) {
@@ -1696,7 +1831,9 @@ async function loadGeoJSON() {
         
         const data = await response.json();
         parseGeoJSON(data);
-        
+        // Large layers stream their buildings in over a few frames.
+        await pendingSceneBuild;
+
         loadingEl.style.opacity = 0;
         setTimeout(() => loadingEl.classList.add('hidden'), 500);
     } catch (e) {
@@ -1993,7 +2130,9 @@ function fitCameraToCity(bounds) {
     const maxDim = Math.max(bounds.maxX - bounds.minX, bounds.maxY - bounds.minY, 1);
     const focus = chooseCameraFocus(maxDim);
     const focusDim = Math.max(120, focus.focusDim);
-    const distance = Math.max(220, Math.min(Math.max(focusDim * 2.4, DEFAULT_CAMERA_DISTANCE), 1800));
+    // Frame the focus block so it fills a comfortable share of the viewport
+    // instead of leaving the city as a small cluster in the middle of the screen.
+    const distance = Math.max(180, Math.min(Math.max(focusDim * 1.05, 180), 1600));
 
     camera.near = 0.5;
     camera.far = Math.max(10000, maxDim * 5, distance * 8);
@@ -2024,6 +2163,21 @@ function fitCameraToCity(bounds) {
     return { maxDim, focusDim, distance };
 }
 
+// Read-only diagnostics snapshot: handy in issue reports (open the browser
+// console and run `planxDiagnostics()`), and used by the automated smoke test.
+window.planxDiagnostics = function planxDiagnostics() {
+    return {
+        parcels: parcelFeatures.length,
+        buildings: parcelFeatures.filter(item => !!item.buildingMesh).length,
+        sceneChildren: scene.children.length,
+        geometries: renderer ? renderer.info.memory.geometries : null,
+        textures: renderer ? renderer.info.memory.textures : null,
+        drawCalls: renderer ? renderer.info.render.calls : null,
+        triangles: renderer ? renderer.info.render.triangles : null,
+        camera: camera ? camera.position.toArray().map(v => Math.round(v)) : null
+    };
+};
+
 function updateSceneDebug(bounds, fallbackReason = null) {
     const buildingCount = parcelFeatures.filter(item => !!item.buildingMesh).length;
     const parcelGroundCount = parcelFeatures.filter(item => !!item.parcelMesh).length;
@@ -2041,6 +2195,10 @@ function updateSceneDebug(bounds, fallbackReason = null) {
         roadMeshes: roadMeshes.length,
         intersectionMeshes: intersectionMeshes.length,
         trafficCars: trafficCars.length,
+        // GPU/memory counters: useful when diagnosing a leak after repeated reloads.
+        sceneChildren: scene.children.length,
+        gpuGeometries: renderer ? renderer.info.memory.geometries : null,
+        gpuTextures: renderer ? renderer.info.memory.textures : null,
         bounds,
         camera: {
             position: camera ? camera.position.toArray() : null,
@@ -2104,6 +2262,10 @@ function parseGeoJSON(data, options = {}) {
     updateUndoRedoButtons();
 
     // 2. Parse features
+    // Geometry parsing is cheap; mesh construction is not. On large layers the
+    // first chunk is built synchronously so the cockpit shows something at once,
+    // then the rest is streamed in over animation frames.
+    const buildQueue = [];
     renderableFeatures.forEach(entry => {
         const f = entry.feature;
         const props = f.properties || {};
@@ -2160,7 +2322,7 @@ function parseGeoJSON(data, options = {}) {
         };
 
         parcelFeatures.push(item);
-        buildFeatureMeshesSafely(item);
+        buildQueue.push(item);
     });
 
     if (parcelFeatures.length === 0) {
@@ -2170,6 +2332,14 @@ function parseGeoJSON(data, options = {}) {
         updateSceneDebug(bounds, options.fallbackReason || 'No valid footprints after parsing');
         return false;
     }
+
+    const buildToken = ++sceneBuildToken;
+    const synchronousCount = buildQueue.length <= PROGRESSIVE_BUILD_THRESHOLD
+        ? buildQueue.length
+        : PROGRESSIVE_BUILD_CHUNK;
+    buildQueue.slice(0, synchronousCount).forEach(item => buildFeatureMeshesSafely(item));
+    invalidatePickMeshes();
+    configureRenderQualityForScene();
 
     // Generate Animated Traffic on road tracks
     try {
@@ -2183,7 +2353,45 @@ function parseGeoJSON(data, options = {}) {
     updateSceneDebug({ ...bounds, maxDim: fit.maxDim, focusDim: fit.focusDim }, options.fallbackReason || null);
     updateHeatmapLegend();
     updateCitySummary();
+
+    if (synchronousCount < buildQueue.length) {
+        pendingSceneBuild = buildProgressiveScene(buildQueue.slice(synchronousCount), buildToken);
+    } else {
+        pendingSceneBuild = Promise.resolve(true);
+    }
     return true;
+}
+
+// Stream the remaining parcels in small batches so a large layer never freezes
+// the first paint (and the browser stays responsive while it fills in).
+let pendingSceneBuild = Promise.resolve(true);
+
+function buildProgressiveScene(queue, token) {
+    return new Promise(resolve => {
+        let index = 0;
+        const step = () => {
+            if (token !== sceneBuildToken) {
+                resolve(false);
+                return;
+            }
+            const end = Math.min(index + PROGRESSIVE_BUILD_CHUNK, queue.length);
+            for (; index < end; index++) {
+                buildFeatureMeshesSafely(queue[index]);
+            }
+            invalidatePickMeshes();
+            needsRender = true;
+            if (index < queue.length) {
+                requestAnimationFrame(step);
+                return;
+            }
+            updateHeatmapLegend();
+            updateCitySummary();
+            updateHeightLabels();
+            requestShadowUpdate();
+            resolve(true);
+        };
+        requestAnimationFrame(step);
+    });
 }
 
 // Dynamic color updates for parcel grounds representing zoning compliance
@@ -2206,6 +2414,13 @@ function updateParcelGroundColor(item, hasViolation) {
     }
 
     item.parcelMesh.material.color.setHex(colorHex);
+}
+
+// Re-apply the ground tint for a single parcel (cheap alternative to a rebuild).
+function refreshParcelGroundColor(item) {
+    if (!item || !item.parcelMesh) return;
+    const violated = heatmapMode === 'compliance' ? calculateParcelMetrics(item).violated : false;
+    updateParcelGroundColor(item, violated);
 }
 
 // Render parcel boundary lines and ground surface
@@ -2240,6 +2455,15 @@ function buildParcelGround(item) {
     const lineGeom = new THREE.BufferGeometry().setFromPoints(borderPoints);
     const lineMat = new THREE.LineBasicMaterial({ color: 0x475569, linewidth: 2 });
     const line = new THREE.Line(lineGeom, lineMat);
+    if (item.borderMesh) {
+        scene.remove(item.borderMesh);
+        item.borderMesh.geometry?.dispose();
+        item.borderMesh.material?.dispose();
+    }
+    // Track the outline so clearScene() can dispose it. Untracked lines used to
+    // pile up on the GPU after every "Reload Data from QGIS".
+    line.userData = { isParcelBorder: true };
+    item.borderMesh = line;
     scene.add(line);
 }
 
@@ -2247,7 +2471,8 @@ function buildParcelGround(item) {
 function buildSidewalk(item) {
     if (item.sidewalkMesh) {
         scene.remove(item.sidewalkMesh);
-        item.sidewalkMesh.geometry.dispose();
+        disposeObject3D(item.sidewalkMesh);
+        item.sidewalkMesh = null;
     }
 
     // Outer sidewalk polygon (shifted 2.0 meters outward)
@@ -2327,12 +2552,10 @@ function buildSidewalk(item) {
             bulb.visible = false; // off by default (daylight)
             pole.add(bulb);
 
-            // Spot light source casting downward
-            const spotLight = new THREE.SpotLight(0xfef08a, 4, 15, Math.PI / 4, 0.5, 1);
-            spotLight.position.set(0, 2.7, 1.2);
-            spotLight.target.position.set(0, 0, 1.2);
-            bulb.add(spotLight);
-            bulb.add(spotLight.target);
+            // Fake downward glow (no dynamic light; see buildStreetlightGlow)
+            const glow = buildStreetlightGlow(false);
+            glow.position.set(0, 2.8, 1.2);
+            bulb.add(glow);
         } else {
             // Plant a beautiful sidewalk tree with random style variety
             const treeStyles = ['conifer', 'deciduous', 'palm'];
@@ -2347,34 +2570,85 @@ function buildSidewalk(item) {
 }
 
 // Rebuild building massing, zoning envelopes, and setback lines based on params
-function rebuildParcel3D(item) {
+// Coalesce rebuild requests into one per animation frame. A slider drag fires
+// dozens of 'input' events per second; rebuilding the full procedural building
+// on each event is what used to make the cockpit stutter on dense layers.
+const pendingRebuilds = new Map();
+const draftDirtyItems = new Set();
+let rebuildFrameScheduled = false;
+let draftRebuildMode = false;
+
+function scheduleParcelRebuild(item, options = {}) {
+    if (!item) return;
+    const draft = options.draft === undefined ? draftRebuildMode : !!options.draft;
+    if (options.immediate) {
+        rebuildParcel3D(item, { draft });
+        if (draft) draftDirtyItems.add(item);
+        else draftDirtyItems.delete(item);
+        return;
+    }
+    // Last write wins, but a full rebuild always supersedes a queued draft one.
+    pendingRebuilds.set(item, draft && pendingRebuilds.get(item) !== false);
+    if (!rebuildFrameScheduled) {
+        rebuildFrameScheduled = true;
+        requestAnimationFrame(flushScheduledRebuilds);
+    }
+}
+
+function flushScheduledRebuilds() {
+    rebuildFrameScheduled = false;
+    const entries = Array.from(pendingRebuilds.entries());
+    pendingRebuilds.clear();
+    entries.forEach(([item, draft]) => {
+        rebuildParcel3D(item, { draft });
+        if (draft) draftDirtyItems.add(item);
+        else draftDirtyItems.delete(item);
+        if (selectedParcels.has(item)) setBuildingHighlight(item.buildingMesh, true);
+    });
+    if (entries.length > 0) requestShadowUpdate();
+}
+
+function beginDraftRebuild() {
+    draftRebuildMode = true;
+}
+
+// Restore full architectural detail (balconies, trees, street furniture) once
+// the pointer is released. Never leaves a draft-only building in the scene.
+function endDraftRebuild() {
+    draftRebuildMode = false;
+    if (draftDirtyItems.size === 0) return;
+    const items = Array.from(draftDirtyItems);
+    draftDirtyItems.clear();
+    items.forEach(item => {
+        rebuildParcel3D(item);
+        if (selectedParcels.has(item)) setBuildingHighlight(item.buildingMesh, true);
+    });
+    requestShadowUpdate();
+}
+
+function rebuildParcel3D(item, options = {}) {
+    const draft = options.draft === true;
+    item._lastBuildWasDraft = draft;
     item.params = sanitizeParcelParams(item.params || {}, item.area, item.outerRing);
 
     // 1. Clear old models
     if (item.buildingMesh) {
         scene.remove(item.buildingMesh);
-        item.buildingMesh.traverse(child => {
-            if (child.isMesh) {
-                child.geometry.dispose();
-                if (Array.isArray(child.material)) {
-                    child.material.forEach(m => m.dispose());
-                } else if (child.material) {
-                    child.material.dispose();
-                }
-            }
-        });
+        disposeObject3D(item.buildingMesh);
         item.buildingMesh = null;
     }
     if (item.setbackMesh) {
         scene.remove(item.setbackMesh);
-        item.setbackMesh.geometry.dispose();
+        if (item.setbackMesh.geometry) item.setbackMesh.geometry.dispose();
+        disposeMaterialOrMaterials(item.setbackMesh.material);
         item.setbackMesh = null;
     }
     if (item.zoningMesh) {
         scene.remove(item.zoningMesh);
-        item.zoningMesh.geometry.dispose();
+        disposeObject3D(item.zoningMesh);
         item.zoningMesh = null;
     }
+    invalidatePickMeshes();
 
     const setback = item.params.setback;
     const floors = item.params.floors;
@@ -2489,7 +2763,7 @@ function rebuildParcel3D(item) {
         });
 
         // Add clustered park trees
-        const numParkTrees = Math.min(6, Math.max(3, Math.floor(item.area / 200)));
+        const numParkTrees = draft ? 0 : Math.min(6, Math.max(3, Math.floor(item.area / 200)));
         for (let i = 0; i < numParkTrees; i++) {
             const angle = Math.random() * Math.PI * 2;
             const dist = 3 + Math.random() * 8;
@@ -2758,7 +3032,7 @@ function rebuildParcel3D(item) {
                     group.add(meshA);
 
                     addRooftopDetails(meshA, insetPoly1, heightA, usage);
-                    addBuildingBalconies(group, insetPoly1, floorsA, floorH);
+                    if (!draft) addBuildingBalconies(group, insetPoly1, floorsA, floorH);
                 }
             }
 
@@ -2782,6 +3056,9 @@ function rebuildParcel3D(item) {
                 meshP.receiveShadow = true;
                 group.add(meshP);
 
+                // Draft rebuilds (while a slider is being dragged) keep the massing
+                // and plaza surface but skip fountains, benches, trees and cars.
+                if (!draft) {
                 let px = 0, py = 0;
                 globalPoly2.forEach(pt => { px += pt.x; py += pt.y; });
                 px /= globalPoly2.length;
@@ -2880,6 +3157,7 @@ function rebuildParcel3D(item) {
                     pL.add(carMesh);
                 }
                 group.add(pL);
+                }
             }
 
             if (localPoly3 && localPoly3.length >= 3) {
@@ -2909,7 +3187,7 @@ function rebuildParcel3D(item) {
                     group.add(meshB);
 
                     buildGableRoof(meshB, insetPoly3, heightB);
-                    addBuildingBalconies(group, insetPoly3, floorsB, floorH);
+                    if (!draft) addBuildingBalconies(group, insetPoly3, floorsB, floorH);
                 }
             }
 
@@ -2955,7 +3233,7 @@ function rebuildParcel3D(item) {
                         addRooftopDetails(meshA, insetPoly1, height, usage);
                     }
 
-                    addBuildingBalconies(group, insetPoly1, floors, floorH);
+                    if (!draft) addBuildingBalconies(group, insetPoly1, floors, floorH);
                 }
             }
 
@@ -2979,6 +3257,7 @@ function rebuildParcel3D(item) {
                 meshP.receiveShadow = true;
                 group.add(meshP);
 
+                if (!draft) {
                 let px = 0, py = 0;
                 globalPoly2.forEach(pt => { px += pt.x; py += pt.y; });
                 px /= globalPoly2.length;
@@ -3008,6 +3287,7 @@ function rebuildParcel3D(item) {
                 for (let k = 0; k < 4; k++) {
                     const tree = buildLowPolyTree(px - 3 + Math.random() * 6, 0.06, -py - 3 + Math.random() * 6, 4 + Math.random() * 2);
                     group.add(tree);
+                }
                 }
             }
 
@@ -3087,12 +3367,14 @@ function rebuildParcel3D(item) {
     if (usage !== 'Park') {
         // Add balconies to standard building typologies
         if (typology !== 'PodiumTower' && typology !== 'SteppedTower' && typology !== 'MultiBuildingBlock') {
-            addBuildingBalconies(buildingGroup, insetRing, floors, floorH);
+            if (!draft) addBuildingBalconies(buildingGroup, insetRing, floors, floorH);
         }
 
-        const lawn = buildSetbackLawn(item, insetRing);
-        if (lawn) buildingGroup.add(lawn);
-        addSidewalkTreesAndAssets(buildingGroup, item, insetRing);
+        if (!draft) {
+            const lawn = buildSetbackLawn(item, insetRing);
+            if (lawn) buildingGroup.add(lawn);
+            addSidewalkTreesAndAssets(buildingGroup, item, insetRing);
+        }
 
         scene.add(buildingGroup);
         item.buildingMesh = buildingGroup;
@@ -3113,6 +3395,7 @@ function rebuildParcel3D(item) {
 
     // Update ground color dynamically matching compliance status
     updateParcelGroundColor(item, hasViolation);
+    if (!draft) requestShadowUpdate();
 }
 
 // Low poly procedural vegetation
@@ -3426,7 +3709,14 @@ function buildUShape(ring, width) {
 }
 
 // Generate textured building materials with window grids dynamically
-function getBuildingMaterials(usage, floors) {
+const facadeTextureCache = new Map();
+const FACADE_TEXTURE_CACHE_LIMIT = 24;
+
+function getCachedFacadeTextures(usage, floors) {
+    const key = `${usage}|${Math.min(16, Math.max(1, Math.round(floors || 1)))}`;
+    let entry = facadeTextureCache.get(key);
+    if (entry) return entry;
+
     let colorHex = '#e2e8f0';
     if (usage === 'Residential') {
         colorHex = '#d97706'; // warm amber facade, bright enough for first view
@@ -3438,9 +3728,26 @@ function getBuildingMaterials(usage, floors) {
         colorHex = '#7c8da0'; // professional slate civic facade
     }
 
-    const textures = createFacadeTextures(colorHex, usage, floors);
-    textures.map.repeat.set(6, 1);
-    textures.emissiveMap.repeat.set(6, 1);
+    entry = createFacadeTextures(colorHex, usage, Math.min(16, Math.max(1, Math.round(floors || 1))));
+    entry.map.repeat.set(6, 1);
+    entry.emissiveMap.repeat.set(6, 1);
+    facadeTextureCache.set(key, entry);
+
+    // Keep the cache bounded: every entry is 2 x 256x512 canvases on the GPU.
+    if (facadeTextureCache.size > FACADE_TEXTURE_CACHE_LIMIT) {
+        const oldestKey = facadeTextureCache.keys().next().value;
+        const oldest = facadeTextureCache.get(oldestKey);
+        if (oldest) {
+            oldest.map.dispose();
+            oldest.emissiveMap.dispose();
+        }
+        facadeTextureCache.delete(oldestKey);
+    }
+    return entry;
+}
+
+function getBuildingMaterials(usage, floors) {
+    const textures = getCachedFacadeTextures(usage, floors);
 
     const tVal = parseFloat(inTime.value);
     const isNight = tVal < 7.5 || tVal > 19.5;
@@ -3601,10 +3908,12 @@ function createFacadeTextures(wallColor, usage, floors) {
     const diffuseTex = new THREE.CanvasTexture(canvas);
     diffuseTex.wrapS = THREE.RepeatWrapping;
     diffuseTex.wrapT = THREE.RepeatWrapping;
+    diffuseTex.userData.shared = true;
 
     const emissiveTex = new THREE.CanvasTexture(emCanvas);
     emissiveTex.wrapS = THREE.RepeatWrapping;
     emissiveTex.wrapT = THREE.RepeatWrapping;
+    emissiveTex.userData.shared = true;
 
     return { map: diffuseTex, emissiveMap: emissiveTex };
 }
@@ -4605,13 +4914,7 @@ function onDocumentClick(event) {
         if (handleIntersects.length > 0) return;
     }
 
-    const meshes = [];
-    parcelFeatures.forEach(item => {
-        if (item.parcelMesh) meshes.push(item.parcelMesh);
-        if (item.buildingMesh) meshes.push(item.buildingMesh);
-    });
-
-    const intersects = raycaster.intersectObjects(meshes);
+    const intersects = raycaster.intersectObjects(getPickMeshes());
 
     if (intersects.length > 0) {
         const hitObject = intersects[0].object;
@@ -4621,7 +4924,7 @@ function onDocumentClick(event) {
                 if (selectedParcels.has(item) && selectedParcels.size > 1) {
                     selectedParcels.delete(item);
                     setBuildingHighlight(item.buildingMesh, false);
-                    rebuildParcel3D(item);
+                    refreshParcelGroundColor(item);
                     const nextActive = Array.from(selectedParcels)[selectedParcels.size - 1];
                     selectParcel(nextActive, { keepSelectionSet: true, skipFocus: true });
                 } else {
@@ -4753,11 +5056,15 @@ function deselectParcel() {
     removeHeightHandle();
     removeSetbackHandle();
     removeScaleHandles();
+    // Selecting used to trigger a full procedural rebuild of every parcel that
+    // was deselected. Only the highlight tint and the ground color actually
+    // depend on the selection, so update those in place.
     prevList.forEach(item => {
         setBuildingHighlight(item.buildingMesh, false);
-        rebuildParcel3D(item);
+        refreshParcelGroundColor(item);
     });
     updateSelectionHud();
+    refreshParcelHeatmap();
 
     placeholderEl.classList.remove('hidden');
     controlsEl.classList.add('hidden');
@@ -4786,7 +5093,31 @@ function setBuildingHighlight(meshOrGroup, isSelected) {
     });
 }
 
+// Metrics are requested from many places (dashboard, city summary, heatmaps,
+// compliance overlays) and recomputing them is the most expensive pure-JS work
+// in the app. Cache per parcel and invalidate by parameter signature.
+const metricsCache = new WeakMap();
+
+function metricsSignature(item) {
+    const p = item.params || {};
+    return [
+        p.setback, p.floors, p.floorHeight, p.typology, p.usage, p.roofStyle,
+        p.scaleX, p.scaleY, p.stepbackInterval, p.stepbackDepth,
+        p.maxBcr, p.maxFar, p.maxHeight, item.area
+    ].join('|');
+}
+
 function calculateParcelMetrics(item) {
+    item.params = sanitizeParcelParams(item.params || {}, item.area, item.outerRing);
+    const signature = metricsSignature(item);
+    const cached = metricsCache.get(item);
+    if (cached && cached.signature === signature) return cached.metrics;
+    const metrics = computeParcelMetrics(item);
+    metricsCache.set(item, { signature, metrics });
+    return metrics;
+}
+
+function computeParcelMetrics(item) {
     item.params = sanitizeParcelParams(item.params || {}, item.area, item.outerRing);
     const params = item.params || {};
     const setback = parseFloat(params.setback) || 0;
@@ -5403,7 +5734,7 @@ async function syncToQGIS() {
         showToast("Connection error: could not reach the QGIS plugin server.", "error");
     } finally {
         btnSync.disabled = false;
-        btnSync.textContent = "Sync Parameters to QGIS";
+        btnSync.textContent = "Sync Parameters & 3D Footprints to QGIS";
     }
 }
 
@@ -5702,6 +6033,8 @@ function applyToAllParcels() {
 // WebGL memory and resource cleanup
 
 function clearScene() {
+    // Cancel any in-flight progressive build from the previous layer.
+    sceneBuildToken++;
     // 1. Deselect any active parcel
     deselectParcel();
 
@@ -5712,6 +6045,14 @@ function clearScene() {
             scene.remove(item.parcelMesh);
             if (item.parcelMesh.geometry) item.parcelMesh.geometry.dispose();
             disposeMaterialOrMaterials(item.parcelMesh.material);
+        }
+
+        // Remove and dispose the parcel outline line
+        if (item.borderMesh) {
+            scene.remove(item.borderMesh);
+            item.borderMesh.geometry?.dispose();
+            item.borderMesh.material?.dispose();
+            item.borderMesh = null;
         }
 
         // Remove and dispose buildingMesh
@@ -5793,18 +6134,23 @@ function disposeMaterialOrMaterials(material) {
 
 function disposeSingleMaterial(m) {
     if (!m) return;
-    if (m.map) m.map.dispose();
-    if (m.lightMap) m.lightMap.dispose();
-    if (m.bumpMap) m.bumpMap.dispose();
-    if (m.normalMap) m.normalMap.dispose();
-    if (m.specularMap) m.specularMap.dispose();
-    if (m.envMap) m.envMap.dispose();
-    if (m.alphaMap) m.alphaMap.dispose();
-    if (m.aoMap) m.aoMap.dispose();
-    if (m.displacementMap) m.displacementMap.dispose();
-    if (m.emissiveMap) m.emissiveMap.dispose();
-    if (m.roughnessMap) m.roughnessMap.dispose();
-    if (m.metalnessMap) m.metalnessMap.dispose();
+    // Facade textures are shared through facadeTextureCache. They must survive a
+    // per-building rebuild, otherwise every slider tick would rebuild canvases.
+    const disposeTexture = tex => {
+        if (tex && !tex.userData?.shared) tex.dispose();
+    };
+    disposeTexture(m.map);
+    disposeTexture(m.lightMap);
+    disposeTexture(m.bumpMap);
+    disposeTexture(m.normalMap);
+    disposeTexture(m.specularMap);
+    disposeTexture(m.envMap);
+    disposeTexture(m.alphaMap);
+    disposeTexture(m.aoMap);
+    disposeTexture(m.displacementMap);
+    disposeTexture(m.emissiveMap);
+    disposeTexture(m.roughnessMap);
+    disposeTexture(m.metalnessMap);
     m.dispose();
 }
 
@@ -5883,7 +6229,8 @@ async function reloadData() {
 
         const data = await response.json();
         parseGeoJSON(data);
-        
+        await pendingSceneBuild;
+
         // Hide loading screen
         if (loadingEl) {
             loadingEl.style.opacity = 0;
@@ -5911,7 +6258,52 @@ async function reloadData() {
 
 let hoveredParcel = null;
 
+// The raycast target list changes only when buildings are added/removed. Caching
+// it removes an array rebuild on every mousemove for large layers.
+let pickMeshesDirty = true;
+let pickMeshes = [];
+
+function invalidatePickMeshes() {
+    pickMeshesDirty = true;
+}
+
+function getPickMeshes() {
+    if (pickMeshesDirty) {
+        pickMeshes = [];
+        parcelFeatures.forEach(item => {
+            if (item.parcelMesh) pickMeshes.push(item.parcelMesh);
+            if (item.buildingMesh) pickMeshes.push(item.buildingMesh);
+        });
+        pickMeshesDirty = false;
+    }
+    return pickMeshes;
+}
+
+let pointerMoveQueued = false;
+let lastPointerEvent = null;
+let lastPointerX = -1;
+let lastPointerY = -1;
+
 function onPointerMove(event) {
+    lastPointerEvent = event;
+    if (pointerMoveQueued) return;
+    pointerMoveQueued = true;
+    requestAnimationFrame(() => {
+        pointerMoveQueued = false;
+        const pending = lastPointerEvent;
+        if (!pending) return;
+        // Skip sub-pixel jitter unless a handle drag needs continuous updates.
+        const dragging = isDraggingHeight || isDraggingSetback || !!isDraggingScaleAxis;
+        if (!dragging && Math.abs(pending.clientX - lastPointerX) < 1.5 && Math.abs(pending.clientY - lastPointerY) < 1.5) {
+            return;
+        }
+        lastPointerX = pending.clientX;
+        lastPointerY = pending.clientY;
+        processPointerMove(pending);
+    });
+}
+
+function processPointerMove(event) {
     if (isUiEventTarget(event.target)) {
         document.body.style.cursor = 'default';
         return;
@@ -5937,6 +6329,9 @@ function onPointerMove(event) {
 
             if (filtered.length > 0) {
                 const hitPoint = filtered[0].point;
+                // Share the hit with updateMeasurementLabels() so the label does
+                // not repeat the same full-scene raycast every animation frame.
+                lastMeasurementHit = hitPoint;
                 const start = measurementPoints[0];
                 
                 const positions = new Float32Array([
@@ -5985,7 +6380,8 @@ function onPointerMove(event) {
                 if (inScaleY) inScaleY.value = nextScale;
                 if (lblScaleY) lblScaleY.textContent = nextScale.toFixed(2);
             }
-            rebuildParcel3D(selectedParcel);
+            rebuildParcel3D(selectedParcel, { draft: true });
+            draftDirtyItems.add(selectedParcel);
             updateDashboard(selectedParcel);
             updateCitySummary();
             updateHeightHandle();
@@ -6011,7 +6407,8 @@ function onPointerMove(event) {
             lblSetback.textContent = clampedSetback.toFixed(1);
             selectedParcel.modified = true;
             
-            rebuildParcel3D(selectedParcel);
+            rebuildParcel3D(selectedParcel, { draft: true });
+            draftDirtyItems.add(selectedParcel);
             updateDashboard(selectedParcel);
             updateHeightHandle();
             updateSetbackHandle();
@@ -6037,7 +6434,8 @@ function onPointerMove(event) {
             selectedParcel.params.floors = newFloors;
             selectedParcel.modified = true;
             
-            rebuildParcel3D(selectedParcel);
+            rebuildParcel3D(selectedParcel, { draft: true });
+            draftDirtyItems.add(selectedParcel);
             updateDashboard(selectedParcel);
             updateHeightHandle();
             updateScaleHandles();
@@ -6088,13 +6486,7 @@ function onPointerMove(event) {
     }
 
     // 3. Fallback: Hovering over standard parcels / buildings
-    const meshes = [];
-    parcelFeatures.forEach(item => {
-        if (item.parcelMesh) meshes.push(item.parcelMesh);
-        if (item.buildingMesh) meshes.push(item.buildingMesh);
-    });
-
-    const intersects = raycaster.intersectObjects(meshes);
+    const intersects = raycaster.intersectObjects(getPickMeshes());
 
     if (intersects.length > 0) {
         const hitObject = intersects[0].object;
@@ -6328,6 +6720,7 @@ function onPointerDown(event) {
 
 // Pointer up event handler to release dragging
 function onPointerUp(event) {
+    const wasDragging = isDraggingHeight || isDraggingSetback || !!isDraggingScaleAxis;
     if (isDraggingHeight) {
         isDraggingHeight = false;
         controls.enabled = true; // Re-enable camera rotation
@@ -6341,6 +6734,12 @@ function onPointerUp(event) {
         dragScaleCenter = null;
         dragScaleAxis = null;
         controls.enabled = true;
+    }
+    // Handle drags build a lightweight massing while moving; restore balconies,
+    // trees and street furniture once the pointer is released.
+    if (wasDragging && draftDirtyItems.size > 0) {
+        endDraftRebuild();
+        scheduleAggregateRefresh(selectedParcel);
     }
 }
 
@@ -6677,6 +7076,7 @@ function handleMeasurementClick(pt) {
 
         // Reset for next measurement
         measurementPoints = [];
+        lastMeasurementHit = null;
         if (tempMeasureLine) tempMeasureLine.visible = false;
         if (tempMeasureLabel) tempMeasureLabel.style.display = 'none';
     }
@@ -6713,6 +7113,7 @@ function clearAllMeasurements() {
 
     savedMeasurements = [];
     measurementPoints = [];
+    lastMeasurementHit = null;
     if (tempMeasureLine) tempMeasureLine.visible = false;
     if (tempMeasureLabel) tempMeasureLabel.style.display = 'none';
 
@@ -6727,27 +7128,16 @@ function updateMeasurementLabels() {
     if (!container) return;
 
     // 1. Update active temporary label
-    if (tempMeasureLabel && tempMeasureLine && measurementPoints.length === 1) {
-        // Find current intersection point under cursor
-        const intersects = raycaster.intersectObjects(scene.children, true);
-        const filtered = intersects.filter(hit => {
-            return hit.object.type === 'Mesh' && 
-                   !hit.object.userData?.isHeightHandle && 
-                   !hit.object.userData?.isSetbackHandle && 
-                   !hit.object.userData?.isMeasurementElement;
-        });
+    if (tempMeasureLabel && tempMeasureLine && measurementPoints.length === 1 && lastMeasurementHit) {
+        const hitPoint = lastMeasurementHit;
+        const start = measurementPoints[0];
+        const midpoint = new THREE.Vector3().addVectors(start, hitPoint).multiplyScalar(0.5);
+        const screenPos = project3DToScreen(midpoint);
+        tempMeasureLabel.style.left = `${screenPos.x}px`;
+        tempMeasureLabel.style.top = `${screenPos.y}px`;
 
-        if (filtered.length > 0) {
-            const hitPoint = filtered[0].point;
-            const start = measurementPoints[0];
-            const midpoint = new THREE.Vector3().addVectors(start, hitPoint).multiplyScalar(0.5);
-            const screenPos = project3DToScreen(midpoint);
-            tempMeasureLabel.style.left = `${screenPos.x}px`;
-            tempMeasureLabel.style.top = `${screenPos.y}px`;
-            
-            const distance = start.distanceTo(hitPoint);
-            tempMeasureLabel.textContent = `${distance.toFixed(2)} m`;
-        }
+        const distance = start.distanceTo(hitPoint);
+        tempMeasureLabel.textContent = `${distance.toFixed(2)} m`;
     }
 
     // 2. Update all saved permanent labels
@@ -7122,7 +7512,45 @@ function buildSetbackLawn(item, insetRing) {
     return lawnMesh;
 }
 
-// Construct a streetlight lamppost with a spotlight source
+// Fake night illumination for a lamppost: an additive light cone plus a ground
+// pool. Real THREE.SpotLight instances were used here before, and with one light
+// per street corner the renderer ended up shading every fragment against dozens
+// of dynamic lights. This keeps the look at (almost) zero cost.
+function buildStreetlightGlow(isNight) {
+    const group = new THREE.Group();
+    group.userData = { isStreetlightGlow: true };
+
+    const coneGeom = new THREE.ConeGeometry(2.2, 4.8, 10, 1, true);
+    const coneMat = new THREE.MeshBasicMaterial({
+        color: 0xfef08a,
+        transparent: true,
+        opacity: 0.09,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending,
+        side: THREE.DoubleSide
+    });
+    const cone = new THREE.Mesh(coneGeom, coneMat);
+    cone.position.y = -2.4;
+    group.add(cone);
+
+    const poolGeom = new THREE.CircleGeometry(2.4, 14);
+    poolGeom.rotateX(-Math.PI / 2);
+    const poolMat = new THREE.MeshBasicMaterial({
+        color: 0xfef08a,
+        transparent: true,
+        opacity: 0.14,
+        depthWrite: false,
+        blending: THREE.AdditiveBlending
+    });
+    const pool = new THREE.Mesh(poolGeom, poolMat);
+    pool.position.y = -4.75;
+    group.add(pool);
+
+    group.visible = isNight;
+    return group;
+}
+
+// Construct a streetlight lamppost with a fake (light-free) night glow
 function buildStreetlight(x, y, z) {
     const group = new THREE.Group();
     group.position.set(x, y, z);
@@ -7155,14 +7583,12 @@ function buildStreetlight(x, y, z) {
     const bulb = new THREE.Mesh(bulbGeom, bulbMat);
     bulb.position.set(0, 4.9, 1.1);
     bulb.userData = { isStreetlightBulb: true };
+    bulb.visible = isNight;
     group.add(bulb);
 
-    // Light source pointing downwards
-    const spotlight = new THREE.SpotLight(0xfef08a, isNight ? 3.0 : 0.0, 15, Math.PI / 4, 0.5, 1);
-    spotlight.position.set(0, 4.8, 1.1);
-    spotlight.target.position.set(0, 0, 1.1);
-    group.add(spotlight);
-    group.add(spotlight.target);
+    const glow = buildStreetlightGlow(isNight);
+    glow.position.set(0, 4.9, 1.1);
+    bulb.add(glow);
 
     return group;
 }
