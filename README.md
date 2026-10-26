@@ -9,7 +9,7 @@
 [![QGIS](https://img.shields.io/badge/QGIS-3.28%2B-93b023?logo=qgis&logoColor=white)](https://plugins.qgis.org/plugins/planx_urban_procedural_3d/)
 [![Documentation](https://img.shields.io/badge/📖_Reference_Manual-13a0a0)](https://geophilo.com/planx_urban_procedural_3d/)
 [![Version](https://img.shields.io/github/v/tag/YusufEminoglu/planx_urban_procedural_3d?label=version&color=blue)](https://gitlab.com/geophilo1/planx_urban_procedural_3d/releases)
-[![License](https://img.shields.io/badge/license-GPL--3.0-orange)](LICENSE)
+[![License](https://img.shields.io/badge/license-GPL--3.0--or--later-orange)](LICENSE)
 [![QGIS Plugin Hub](https://img.shields.io/badge/QGIS%20Hub-install-589632?logo=qgis&logoColor=white)](https://plugins.qgis.org/plugins/planx_urban_procedural_3d/)
 
 </div>
