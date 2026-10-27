@@ -3,7 +3,7 @@ name=Urban Procedural 3D Studio
 qgisMinimumVersion=3.28
 qgisMaximumVersion=4.99
 description=Design blocks and parcels in 3D and watch the zoning numbers change: edit setbacks, heights and building typologies live in the browser, then sync geometry and compliance metrics back to QGIS.
-version=0.7.0
+version=0.7.1
 author=Geophilo
 email=yusuf.eminoglu@deu.edu.tr
 

@@ -1,5 +1,9 @@
 # Changelog
 
+## [0.7.1] - 2026-10-27
+
+- Hub listing text rewritten; author Geophilo; university affiliation removed; documentation links use the standard geophilo.com pages (manual.html, guide/); manual HTML no longer ships in the plugin package.
+
 ## [0.7.0] - 2026-10-20
 
 - Performance overhaul (demand rendering, progressive building, memory leak cleanup), CRS HUD chip, and illustrated Reference Manual with real QGIS screenshots
