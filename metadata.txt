@@ -2,19 +2,22 @@
 name=Urban Procedural 3D Studio
 qgisMinimumVersion=3.28
 qgisMaximumVersion=4.99
-description=Parametric 3D urban design and procedural planning toolbox with real-time compliance feedback.
+description=Design blocks and parcels in 3D and watch the zoning numbers change: edit setbacks, heights and building typologies live in the browser, then sync geometry and compliance metrics back to QGIS.
 version=0.7.0
 author=Geophilo
 email=yusuf.eminoglu@deu.edu.tr
 
-about=PlanX Urban Procedural 3D is an interactive parametric design tool for QGIS. It enables planners to select parcel/block boundaries, open a local Three.js 3D editor, adjust setbacks, building heights, and typologies live in the browser, and sync the generated geometry and compliance metrics back into the QGIS project. Online User Manual & Documentation: https://geophilo.com/planx_urban_procedural_3d/ | If you find this plugin helpful, please consider starring the repository on GitLab (https://gitlab.com/geophilo1/planx_urban_procedural_3d)!
+about=Urban Procedural 3D Studio links a plan's rules to the buildings they allow. Select parcel or block boundaries in QGIS and open them in a local Three.js editor. Change setbacks, heights and typologies and the massing rebuilds at once, with the coverage, floor-area and height figures updated beside it so you see whether the scheme still complies.
+    When the design is right, send it back: the generated buildings and their compliance metrics land in your QGIS project as ordinary layers, ready for maps, tables and further analysis.
+    The editor runs on a local server; your data stays on your computer.
+    Manual: https://geophilo.com/planx_urban_procedural_3d/manual.html
 
 tracker=https://gitlab.com/geophilo1/planx_urban_procedural_3d/-/issues
 repository=https://gitlab.com/geophilo1/planx_urban_procedural_3d
 homepage=https://geophilo.com/planx_urban_procedural_3d/
 
 category=Vector
-tags=planx,qgis,urban,procedural,3d,zoning,parametric,modelling,urban planning,massing
+tags=planx,urban,procedural,3d,zoning,parametric,modelling,urban planning,massing,setback,far,building envelope,geophilo
 icon=icons/icon.png
 
 experimental=False
